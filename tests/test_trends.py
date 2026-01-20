@@ -72,7 +72,7 @@ class TestHackerNewsSource:
             "metadata": {"descendants": 100}
         }
 
-        score = source.calculate_relevance_score(trend)2026-01-19
+        score = source.calculate_relevance_score(trend)
         assert 0 <= score <= 1.0
         assert score > 0.5  # Should have high score due to AI keywords
 
@@ -109,18 +109,13 @@ class TestRSSFeedSource:
         """Test RSS entry parsing with minimal data"""
         source = RSSFeedSource()
 
-        # Mock RSS entry with spec to handle hasattr checks
-        entry = MagicMock()
-        entry.get = MagicMock(side_effect=lambda key, default=None: {
-            "title": "Test Article",
-            "link": "https://example.com/article"
-        }.get(key, default))
+        # Mock RSS entry
+        entry = Mock()
         entry.title = "Test Article"
         entry.link = "https://example.com/article"
         entry.summary = "Test description"
         entry.published_parsed = None
         entry.updated_parsed = None
-        entry.tags = []
 
         trend = source._entry_to_trend(entry, "Test Feed")
 
