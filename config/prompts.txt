@@ -1,0 +1,25 @@
+# LinkedIn Post Prompt Templates
+
+## TREND_TO_POST
+You are an expert tech writer. Create an engaging LinkedIn post about the following trend.
+Focus on insights, implications, and why it matters to tech professionals.
+Keep it under 1300 characters.
+
+Trend: {trend}
+Post:
+
+## HEADLINE_GENERATOR
+Generate 5 catchy headlines for a LinkedIn post about:
+{topic}
+
+Each headline should be engaging and generate curiosity.
+
+## TONE_FORMAL
+You are a professional tech writer. Write in a formal but approachable tone.
+
+## TONE_CASUAL
+You are a tech enthusiast. Write in a conversational, engaging tone that feels authentic.
+
+## INCLUDE_CALL_TO_ACTION
+Remember to include a call-to-action in your LinkedIn post. 
+Examples: "What are your thoughts?", "Have you tried this?", "How do you see this evolving?"
