@@ -85,6 +85,7 @@ class TrendSourcesConfig(BaseModel):
     """Configuration for trend data sources"""
 
     # RSS Feeds
+    rss_enabled: bool = Field(default=True, description="Enable RSS feeds")
     rss_feeds: List[str] = Field(
         default=[
             "https://techcrunch.com/feed/",
@@ -92,6 +93,9 @@ class TrendSourcesConfig(BaseModel):
             "https://feeds.arstechnica.com/arstechnica/technology-lab",
         ],
         description="RSS feed URLs to fetch",
+    )
+    rss_max_items_per_feed: int = Field(
+        default=10, ge=1, le=50, description="Max items to fetch per RSS feed"
     )
 
     # Hacker News
@@ -116,8 +120,11 @@ class TrendSourcesConfig(BaseModel):
         default=["MachineLearning", "artificial", "technology", "programming"],
         description="Subreddits to monitor",
     )
-    reddit_post_limit: int = Field(
-        default=25, ge=1, le=100, description="Posts to fetch per subreddit"
+    reddit_min_score: int = Field(
+        default=50, ge=0, description="Minimum Reddit post score"
+    )
+    reddit_max_items_per_subreddit: int = Field(
+        default=10, ge=1, le=50, description="Max items to fetch per subreddit"
     )
 
     # GitHub Trending
@@ -128,6 +135,12 @@ class TrendSourcesConfig(BaseModel):
     )
     github_time_range: str = Field(
         default="daily", description="Time range: daily, weekly, monthly"
+    )
+    github_min_stars_today: int = Field(
+        default=10, ge=0, description="Minimum stars gained today"
+    )
+    github_max_items: int = Field(
+        default=20, ge=1, le=50, description="Max trending repos to fetch"
     )
 
     # arXiv
