@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, validator, HttpUrl
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)
 
 # Base directory
 BASE_DIR = Path(__file__).parent.parent
@@ -67,8 +67,11 @@ class LinkedInConfig(BaseModel):
     refresh_token: Optional[str] = Field(
         default=None, description="LinkedIn refresh token"
     )
-    token_expiry: Optional[str] = Field(
-        default=None, description="Token expiry timestamp"
+    token_expires_at: Optional[str] = Field(
+        default=None, description="Token expiration timestamp (ISO format)"
+    )
+    user_urn: Optional[str] = Field(
+        default=None, description="LinkedIn user URN (urn:li:person:XXXXX)"
     )
 
     # API settings
@@ -326,6 +329,8 @@ class Settings(BaseModel):
                 ),
                 access_token=os.getenv("LINKEDIN_ACCESS_TOKEN"),
                 refresh_token=os.getenv("LINKEDIN_REFRESH_TOKEN"),
+                token_expires_at=os.getenv("LINKEDIN_TOKEN_EXPIRES_AT"),
+                user_urn=os.getenv("LINKEDIN_USER_URN"),
             ),
             trends=TrendSourcesConfig(
                 hackernews_enabled=os.getenv("TRENDS_HACKERNEWS_ENABLED", "true").lower()
