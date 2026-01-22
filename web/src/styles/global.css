@@ -1,15 +1,29 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@400;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Sora:wght@400;500;600;700&display=swap");
 
 :root {
-  --bg: #f6f1e7;
-  --bg-2: #efe6d6;
-  --ink: #1c1b1a;
-  --muted: #5a524c;
-  --accent: #1f8a8a;
-  --accent-2: #f26b3a;
+  color-scheme: light;
+  --bg: #f7f8fb;
+  --bg-2: #eef1f6;
+  --ink: #15171c;
+  --muted: #5c6573;
+  --accent: #3b5bfd;
+  --accent-2: #111827;
   --card: #ffffff;
-  --line: rgba(28, 27, 26, 0.12);
-  --shadow: 0 16px 40px rgba(28, 27, 26, 0.12);
+  --line: rgba(21, 23, 28, 0.12);
+  --shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --bg-2: #151820;
+  --ink: #f5f7fb;
+  --muted: #a3adbd;
+  --accent: #8aa0ff;
+  --accent-2: #e2e8f0;
+  --card: #151922;
+  --line: rgba(226, 232, 240, 0.12);
+  --shadow: 0 18px 30px rgba(0, 0, 0, 0.35);
 }
 
 * {
@@ -18,11 +32,9 @@
 
 body {
   margin: 0;
-  font-family: "Space Grotesk", sans-serif;
+  font-family: "Sora", sans-serif;
   color: var(--ink);
-  background: radial-gradient(circle at 20% 10%, #f8f4ec 0%, transparent 50%),
-    radial-gradient(circle at 80% 20%, #f0f7f5 0%, transparent 45%),
-    linear-gradient(135deg, var(--bg), var(--bg-2));
+  background: var(--bg);
   min-height: 100vh;
 }
 
@@ -34,28 +46,62 @@ a {
 .page {
   max-width: 1120px;
   margin: 0 auto;
-  padding: 32px 24px 80px;
+  padding: 28px 24px 80px;
 }
 
 .site-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  align-items: center;
   gap: 16px;
-  margin-bottom: 32px;
+  padding: 10px 0 18px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--line);
 }
 
 .brand {
   font-weight: 700;
-  font-size: 1.3rem;
-  letter-spacing: -0.02em;
+  font-size: 1.1rem;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
 }
 
 .nav-links {
   display: flex;
-  gap: 16px;
-  font-weight: 600;
+  align-items: center;
+  gap: 18px;
+  font-weight: 500;
   font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.nav-links a {
+  line-height: 1;
+  padding-bottom: 4px;
+  border-bottom: 1px solid transparent;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.nav-links a:hover {
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.theme-toggle {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.theme-toggle:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .hero {
@@ -78,14 +124,14 @@ a {
 .panel {
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 20px;
+  border-radius: 16px;
   padding: 24px;
   box-shadow: var(--shadow);
 }
 
 .panel h2 {
   margin: 0 0 16px;
-  font-size: 1.3rem;
+  font-size: 1.2rem;
 }
 
 .grid {
@@ -114,7 +160,8 @@ select {
   border: 1px solid var(--line);
   font-family: inherit;
   font-size: 0.95rem;
-  background: #fffdf8;
+  background: var(--bg-2);
+  color: var(--ink);
 }
 
 textarea {
@@ -149,13 +196,13 @@ textarea {
 .button {
   padding: 12px 18px;
   border-radius: 999px;
-  border: none;
+  border: 1px solid var(--accent);
   background: var(--accent);
   color: white;
   font-weight: 700;
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
-  box-shadow: 0 12px 30px rgba(31, 138, 138, 0.25);
+  box-shadow: 0 12px 24px rgba(59, 91, 253, 0.25);
 }
 
 .button.secondary {
@@ -194,11 +241,12 @@ textarea {
 
 .card {
   background: var(--card);
-  border-radius: 18px;
+  border-radius: 16px;
   border: 1px solid var(--line);
   padding: 18px;
   display: grid;
   gap: 12px;
+  box-shadow: var(--shadow);
 }
 
 .card h3 {
@@ -232,19 +280,19 @@ textarea {
   gap: 6px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(31, 138, 138, 0.12);
+  background: rgba(59, 91, 253, 0.12);
   color: var(--accent);
   font-size: 0.78rem;
   font-weight: 600;
 }
 
 .tag.orange {
-  background: rgba(242, 107, 58, 0.18);
-  color: #b84e27;
+  background: rgba(226, 232, 240, 0.25);
+  color: var(--accent-2);
 }
 
 .mono {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .footer-note {
@@ -257,6 +305,10 @@ textarea {
   .site-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .nav-links {
+    flex-wrap: wrap;
   }
 
   .actions {

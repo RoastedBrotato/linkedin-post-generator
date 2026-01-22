@@ -10,6 +10,16 @@ const { title = "Trend Signal Studio" } = Astro.props;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="generator" content={Astro.generator} />
     <title>{title}</title>
+    <script>
+      (() => {
+        const stored = localStorage.getItem("theme");
+        const preferred = window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+        const theme = stored || preferred;
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
   </head>
   <body>
     <main class="page">
@@ -20,8 +30,28 @@ const { title = "Trend Signal Studio" } = Astro.props;
           <a href="/posts">Posts</a>
           <a href="/history">History</a>
         </nav>
+        <button class="theme-toggle" type="button" aria-label="Toggle theme" data-theme-toggle>
+          Theme
+        </button>
       </header>
       <slot />
     </main>
+    <script>
+      const button = document.querySelector("[data-theme-toggle]");
+      const setLabel = (theme) => {
+        button.textContent = theme === "dark" ? "Light" : "Dark";
+      };
+
+      if (button) {
+        const current = document.documentElement.dataset.theme || "light";
+        setLabel(current);
+        button.addEventListener("click", () => {
+          const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+          document.documentElement.dataset.theme = next;
+          localStorage.setItem("theme", next);
+          setLabel(next);
+        });
+      }
+    </script>
   </body>
 </html>
