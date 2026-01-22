@@ -1,0 +1,348 @@
+---
+import Base from "../layouts/Base.astro";
+
+const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
+---
+<Base title="BrotatosLab">
+  <section class="hero">
+    <h1>Build a research feed from your keywords.</h1>
+    <p>
+      Pick sources, add phrases, and assemble a curated trend stream. Generate posts later
+      if you need them.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Research Query</h2>
+    <form id="queryForm" class="grid">
+      <div class="grid grid-2">
+        <div>
+          <label for="keywords">Keywords (quotes for phrases)</label>
+          <textarea
+            id="keywords"
+            name="keywords"
+            placeholder='e.g., "vector database" llm agents product'
+          ></textarea>
+        </div>
+        <div>
+          <label for="phrases">Phrases (comma or new line)</label>
+          <textarea
+            id="phrases"
+            name="phrases"
+            placeholder="e.g., agentic workflows, model governance"
+          ></textarea>
+        </div>
+      </div>
+
+      <div class="grid grid-2">
+        <div class="panel" style="box-shadow:none;">
+          <h3>Sources</h3>
+          <div class="grid">
+            <label class="toggle">
+              <input type="checkbox" id="sourceHn" checked />
+              Hacker News
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="sourceRss" checked />
+              RSS Feeds
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="sourceGh" checked />
+              GitHub Trending
+            </label>
+          </div>
+        </div>
+        <div class="panel" style="box-shadow:none;">
+          <h3>Options</h3>
+          <div class="grid">
+            <div class="grid grid-2">
+              <div>
+                <label for="hnMinScore">HN min score</label>
+                <input id="hnMinScore" type="number" min="0" placeholder="100" />
+              </div>
+              <div>
+                <label for="hnMaxItems">HN max items</label>
+                <input id="hnMaxItems" type="number" min="1" placeholder="30" />
+              </div>
+            </div>
+            <div>
+              <label for="rssFeeds">RSS feeds (one per line)</label>
+              <textarea
+                id="rssFeeds"
+                placeholder="https://techcrunch.com/feed/"
+              ></textarea>
+            </div>
+            <div class="grid grid-2">
+              <div>
+                <label for="rssMaxItems">RSS max per feed</label>
+                <input id="rssMaxItems" type="number" min="1" placeholder="10" />
+              </div>
+              <div>
+                <label for="ghTimeframe">GitHub timeframe</label>
+                <select id="ghTimeframe">
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid grid-2">
+              <div>
+                <label for="ghMinStars">GitHub min stars today</label>
+                <input id="ghMinStars" type="number" min="0" placeholder="25" />
+              </div>
+              <div>
+                <label for="ghMaxItems">GitHub max items</label>
+                <input id="ghMaxItems" type="number" min="1" placeholder="30" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="button" type="submit">Run research query</button>
+        <button class="button secondary" type="reset">Reset</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel" style="margin-top:24px;">
+    <h2>Results</h2>
+    <div class="status">
+      Run status:
+      <strong id="runStatus">Idle</strong>
+      <span id="runMeta" class="mono"></span>
+    </div>
+    <div id="results" class="results"></div>
+  </section>
+
+  <p class="footer-note">
+    Tip: Add quoted phrases for exact matches. Example:
+    <span class="mono">"vector database"</span>
+  </p>
+
+  <script define:vars={{ apiBase }}>
+    const API_BASE = apiBase;
+    const form = document.getElementById("queryForm");
+    const resultsEl = document.getElementById("results");
+    const statusEl = document.getElementById("runStatus");
+    const metaEl = document.getElementById("runMeta");
+
+    const parseList = (value) => {
+      return value
+        .split(/[\n,]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    };
+
+    const buildOptions = () => {
+      const options = {};
+
+      if (document.getElementById("sourceHn").checked) {
+        const minScore = Number(document.getElementById("hnMinScore").value);
+        const maxItems = Number(document.getElementById("hnMaxItems").value);
+        options.hackernews = {};
+        if (!Number.isNaN(minScore) && minScore > 0) {
+          options.hackernews.min_score = minScore;
+        }
+        if (!Number.isNaN(maxItems) && maxItems > 0) {
+          options.hackernews.max_items = maxItems;
+        }
+      }
+
+      if (document.getElementById("sourceRss").checked) {
+        const feeds = parseList(document.getElementById("rssFeeds").value);
+        const maxItems = Number(document.getElementById("rssMaxItems").value);
+        options.rss = {};
+        if (feeds.length) {
+          options.rss.feeds = feeds;
+        }
+        if (!Number.isNaN(maxItems) && maxItems > 0) {
+          options.rss.max_items_per_feed = maxItems;
+        }
+      }
+
+      if (document.getElementById("sourceGh").checked) {
+        const timeframe = document.getElementById("ghTimeframe").value;
+        const minStars = Number(document.getElementById("ghMinStars").value);
+        const maxItems = Number(document.getElementById("ghMaxItems").value);
+        options.github = { timeframe };
+        if (!Number.isNaN(minStars) && minStars > 0) {
+          options.github.min_stars_today = minStars;
+        }
+        if (!Number.isNaN(maxItems) && maxItems > 0) {
+          options.github.max_items = maxItems;
+        }
+      }
+
+      return options;
+    };
+
+    const buildSources = () => {
+      const sources = [];
+      if (document.getElementById("sourceHn").checked) {
+        sources.push("hackernews");
+      }
+      if (document.getElementById("sourceRss").checked) {
+        sources.push("rss");
+      }
+      if (document.getElementById("sourceGh").checked) {
+        sources.push("github");
+      }
+      return sources;
+    };
+
+    const renderResults = (results) => {
+      resultsEl.innerHTML = "";
+      if (!results.length) {
+        const empty = document.createElement("p");
+        empty.textContent = "No matches yet. Try different keywords or sources.";
+        empty.className = "mono";
+        resultsEl.appendChild(empty);
+        return;
+      }
+
+      results.forEach((item) => {
+        const card = document.createElement("div");
+        card.className = "card";
+
+        const title = document.createElement("h3");
+        title.textContent = item.title || "Untitled";
+        card.appendChild(title);
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = `${item.source_name || "Unknown Source"} · score ${item.match_score}`;
+        card.appendChild(meta);
+
+        if (item.description) {
+          const desc = document.createElement("p");
+          desc.textContent = item.description.slice(0, 220);
+          card.appendChild(desc);
+        }
+
+        const tags = document.createElement("div");
+        tags.className = "meta";
+        (item.matched_terms || []).slice(0, 6).forEach((term) => {
+          const tag = document.createElement("span");
+          tag.className = "tag";
+          tag.textContent = term;
+          tags.appendChild(tag);
+        });
+        card.appendChild(tags);
+
+        const actions = document.createElement("div");
+        actions.className = "card-actions";
+
+        if (item.source_url) {
+          const link = document.createElement("a");
+          link.href = item.source_url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.className = "tag orange";
+          link.textContent = "Open source";
+          actions.appendChild(link);
+        }
+
+        const generateBtn = document.createElement("button");
+        generateBtn.className = "button small";
+        generateBtn.textContent = "Generate Post";
+        generateBtn.onclick = () => generatePost(item.id);
+        actions.appendChild(generateBtn);
+
+        card.appendChild(actions);
+        resultsEl.appendChild(card);
+      });
+    };
+
+    const pollResults = (runId) => {
+      const interval = setInterval(async () => {
+        const statusRes = await fetch(`${API_BASE}/api/query-runs/${runId}`);
+        if (!statusRes.ok) {
+          statusEl.textContent = "Error";
+          clearInterval(interval);
+          return;
+        }
+        const status = await statusRes.json();
+        statusEl.textContent = status.status;
+        metaEl.textContent = status.status === "complete" ? `run #${runId}` : "";
+
+        if (status.status === "complete" || status.status === "failed") {
+          clearInterval(interval);
+          const resultsRes = await fetch(`${API_BASE}/api/query-runs/${runId}/results`);
+          if (resultsRes.ok) {
+            const data = await resultsRes.json();
+            renderResults(data.results || []);
+          }
+        }
+      }, 2000);
+    };
+
+    const generatePost = async (trendId) => {
+      if (!confirm("Generate a LinkedIn post from this trend?")) return;
+
+      const button = event.target;
+      button.disabled = true;
+      button.textContent = "Generating...";
+
+      try {
+        const response = await fetch(`${API_BASE}/api/posts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trend_id: trendId }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || "Failed to generate post");
+        }
+
+        const post = await response.json();
+        alert("Post generated successfully! Redirecting to edit...");
+        window.location.href = `/posts/${post.id}`;
+      } catch (error) {
+        alert(`Error: ${error.message}`);
+        button.disabled = false;
+        button.textContent = "Generate Post";
+      }
+    };
+
+    window.generatePost = generatePost;
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      resultsEl.innerHTML = "";
+      statusEl.textContent = "Submitting...";
+      metaEl.textContent = "";
+
+      const payload = {
+        keywords: document.getElementById("keywords").value.trim(),
+        phrases: parseList(document.getElementById("phrases").value),
+        sources: buildSources(),
+        options: buildOptions(),
+      };
+
+      // Show helpful message if no filters provided
+      if (!payload.keywords && !payload.phrases.length) {
+        statusEl.textContent = "Fetching all trends (no filters)";
+      }
+
+      const response = await fetch(`${API_BASE}/api/query-runs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        statusEl.textContent = "Failed";
+        return;
+      }
+
+      const data = await response.json();
+      statusEl.textContent = data.status;
+      metaEl.textContent = `run #${data.id}`;
+      pollResults(data.id);
+    });
+  </script>
+</Base>

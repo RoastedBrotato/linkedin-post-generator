@@ -4,6 +4,7 @@ Database management for the LinkedIn Post Generator.
 Handles SQLite database initialization, connections, and CRUD operations.
 """
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
@@ -77,6 +78,33 @@ CREATE TABLE IF NOT EXISTS publishing_history (
     FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
 );
 
+-- Query runs (for web UI history and filtering)
+CREATE TABLE IF NOT EXISTS query_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    keywords_raw TEXT NOT NULL,
+    phrases_raw TEXT NOT NULL,
+    sources_json TEXT NOT NULL,
+    options_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    error_message TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP
+);
+
+-- Query run results (join to trends)
+CREATE TABLE IF NOT EXISTS query_run_trends (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    query_run_id INTEGER NOT NULL,
+    trend_id INTEGER NOT NULL,
+    match_score REAL NOT NULL DEFAULT 0.0,
+    matched_terms_json TEXT NOT NULL,
+    match_fields_json TEXT NOT NULL,
+    rank INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (query_run_id) REFERENCES query_runs(id) ON DELETE CASCADE,
+    FOREIGN KEY (trend_id) REFERENCES trends(id) ON DELETE CASCADE
+);
+
 -- Indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_trends_category ON trends(category);
 CREATE INDEX IF NOT EXISTS idx_trends_fetched_at ON trends(fetched_at);
@@ -86,6 +114,10 @@ CREATE INDEX IF NOT EXISTS idx_posts_trend_id ON posts(trend_id);
 CREATE INDEX IF NOT EXISTS idx_posts_generated_at ON posts(generated_at);
 CREATE INDEX IF NOT EXISTS idx_sources_post_id ON sources(post_id);
 CREATE INDEX IF NOT EXISTS idx_publishing_history_post_id ON publishing_history(post_id);
+CREATE INDEX IF NOT EXISTS idx_query_runs_status ON query_runs(status);
+CREATE INDEX IF NOT EXISTS idx_query_runs_created_at ON query_runs(created_at);
+CREATE INDEX IF NOT EXISTS idx_query_run_trends_query_run_id ON query_run_trends(query_run_id);
+CREATE INDEX IF NOT EXISTS idx_query_run_trends_match_score ON query_run_trends(match_score);
 """
 
 
@@ -120,6 +152,26 @@ class Database:
         """Initialize database with schema"""
         with self.get_connection() as conn:
             conn.executescript(SCHEMA_SQL)
+            self._run_migrations(conn)
+
+    def _run_migrations(self, conn):
+        """Run database migrations"""
+        cursor = conn.cursor()
+
+        # Check if hashtags column exists
+        cursor.execute("PRAGMA table_info(posts)")
+        columns = [row[1] for row in cursor.fetchall()]
+
+        if "hashtags" not in columns:
+            cursor.execute("ALTER TABLE posts ADD COLUMN hashtags TEXT")
+
+        if "platform_post_id" not in columns:
+            cursor.execute("ALTER TABLE posts ADD COLUMN platform_post_id TEXT")
+
+        if "post_url" not in columns:
+            cursor.execute("ALTER TABLE posts ADD COLUMN post_url TEXT")
+
+        conn.commit()
 
     # ==================== TRENDS CRUD ====================
 
@@ -151,6 +203,15 @@ class Database:
         """Get a trend by ID"""
         with self.get_connection() as conn:
             cursor = conn.execute("SELECT * FROM trends WHERE id = ?", (trend_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_trend_by_url(self, source_url: str) -> Optional[Dict[str, Any]]:
+        """Get a trend by source URL"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM trends WHERE source_url = ?", (source_url,)
+            )
             row = cursor.fetchone()
             return dict(row) if row else None
 
@@ -388,6 +449,227 @@ class Database:
                 f"UPDATE publishing_history SET {set_clause} WHERE id = ?", values
             )
             return cursor.rowcount > 0
+
+    # ==================== QUERY RUNS CRUD ====================
+
+    def create_query_run(
+        self,
+        keywords_raw: str,
+        phrases_raw: str,
+        sources_json: str,
+        options_json: str,
+        status: str = "queued",
+    ) -> int:
+        """Create a new query run record"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO query_runs (
+                    keywords_raw, phrases_raw, sources_json, options_json,
+                    status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    keywords_raw,
+                    phrases_raw,
+                    sources_json,
+                    options_json,
+                    status,
+                    datetime.utcnow(),
+                ),
+            )
+            return cursor.lastrowid
+
+    def get_query_run(self, query_run_id: int) -> Optional[Dict[str, Any]]:
+        """Get a query run by ID"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM query_runs WHERE id = ?", (query_run_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def list_query_runs(self, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+        """List query runs (most recent first)"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM query_runs
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def update_query_run(self, query_run_id: int, **kwargs) -> bool:
+        """Update a query run record"""
+        if "options_json" in kwargs and isinstance(kwargs["options_json"], dict):
+            kwargs["options_json"] = json.dumps(kwargs["options_json"])
+        if "sources_json" in kwargs and isinstance(kwargs["sources_json"], list):
+            kwargs["sources_json"] = json.dumps(kwargs["sources_json"])
+        if "phrases_raw" in kwargs and isinstance(kwargs["phrases_raw"], list):
+            kwargs["phrases_raw"] = json.dumps(kwargs["phrases_raw"])
+
+        set_clause = ", ".join(f"{k} = ?" for k in kwargs.keys())
+        values = list(kwargs.values()) + [query_run_id]
+
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                f"UPDATE query_runs SET {set_clause} WHERE id = ?", values
+            )
+            return cursor.rowcount > 0
+
+    def add_query_run_trend(
+        self,
+        query_run_id: int,
+        trend_id: int,
+        match_score: float,
+        matched_terms_json: str,
+        match_fields_json: str,
+        rank: int,
+    ) -> int:
+        """Create a query run trend result record"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO query_run_trends (
+                    query_run_id, trend_id, match_score, matched_terms_json,
+                    match_fields_json, rank, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    query_run_id,
+                    trend_id,
+                    match_score,
+                    matched_terms_json,
+                    match_fields_json,
+                    rank,
+                    datetime.utcnow(),
+                ),
+            )
+            return cursor.lastrowid
+
+    def get_query_run_results(
+        self,
+        query_run_id: int,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Get query run results joined with trend data"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT
+                    qrt.id as query_run_trend_id,
+                    qrt.match_score,
+                    qrt.matched_terms_json,
+                    qrt.match_fields_json,
+                    qrt.rank,
+                    t.*
+                FROM query_run_trends qrt
+                JOIN trends t ON t.id = qrt.trend_id
+                WHERE qrt.query_run_id = ?
+                ORDER BY qrt.rank ASC
+                LIMIT ? OFFSET ?
+                """,
+                (query_run_id, limit, offset),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    # ==================== HELPER METHODS FOR WEB API ====================
+
+    def get_trend_by_id(self, trend_id: int) -> Optional[Dict[str, Any]]:
+        """Get a trend by ID (alias for get_trend)"""
+        return self.get_trend(trend_id)
+
+    def get_post_with_trend(self, post_id: int) -> Optional[Dict[str, Any]]:
+        """Get a post with its associated trend data"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT
+                    p.*,
+                    t.title as trend_title,
+                    t.description as trend_description,
+                    t.source_url as trend_url,
+                    t.source_name as trend_source
+                FROM posts p
+                JOIN trends t ON t.id = p.trend_id
+                WHERE p.id = ?
+                """,
+                (post_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def list_posts(
+        self,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """List posts, optionally filtered by status"""
+        with self.get_connection() as conn:
+            if status:
+                cursor = conn.execute(
+                    """
+                    SELECT
+                        p.*,
+                        t.title as trend_title,
+                        t.source_url as trend_url
+                    FROM posts p
+                    JOIN trends t ON t.id = p.trend_id
+                    WHERE p.status = ?
+                    ORDER BY p.created_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (status, limit, offset),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    SELECT
+                        p.*,
+                        t.title as trend_title,
+                        t.source_url as trend_url
+                    FROM posts p
+                    JOIN trends t ON t.id = p.trend_id
+                    ORDER BY p.created_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (limit, offset),
+                )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def update_post_status(self, post_id: int, status: str) -> bool:
+        """Update post status"""
+        return self.update_post(post_id, status=status, updated_at=datetime.utcnow())
+
+    def create_post_from_dict(
+        self,
+        content: str,
+        trend_id: int,
+        status: str = "pending",
+        hashtags: Optional[str] = None
+    ) -> int:
+        """Helper to create post from dict (for API)"""
+        from src.models import Post
+        post = Post(
+            trend_id=trend_id,
+            content=content,
+            status=status,
+            generated_at=datetime.utcnow(),
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        post_id = self.create_post(post)
+
+        # Update with hashtags if provided
+        if hashtags:
+            self.update_post(post_id, hashtags=hashtags)
+
+        return post_id
 
     # ==================== UTILITY METHODS ====================
 

@@ -1,0 +1,27 @@
+---
+import "../styles/global.css";
+
+const { title = "Trend Signal Studio" } = Astro.props;
+---
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <main class="page">
+      <header class="site-header">
+        <div class="brand">BrotatosLab</div>
+        <nav class="nav-links">
+          <a href="/">Research</a>
+          <a href="/posts">Posts</a>
+          <a href="/history">History</a>
+        </nav>
+      </header>
+      <slot />
+    </main>
+  </body>
+</html>

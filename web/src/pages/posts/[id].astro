@@ -1,0 +1,349 @@
+---
+import Base from "../../layouts/Base.astro";
+
+const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
+const { id } = Astro.params;
+---
+<Base title="Edit Post - BrotatosLab">
+  <section class="hero">
+    <h1>Edit Post</h1>
+    <p>Review and edit your post before publishing</p>
+  </section>
+
+  <section class="panel">
+    <div id="postEditor">
+      <p class="mono">Loading post...</p>
+    </div>
+  </section>
+
+  <script define:vars={{ apiBase, id }}>
+    const API_BASE = apiBase;
+    const POST_ID = parseInt(id);
+
+    let currentPost = null;
+
+    async function loadPost() {
+      const container = document.getElementById("postEditor");
+
+      try {
+        const response = await fetch(`${API_BASE}/api/posts/${POST_ID}`);
+        if (!response.ok) throw new Error("Post not found");
+
+        currentPost = await response.json();
+        renderEditor(currentPost);
+      } catch (error) {
+        container.innerHTML = `
+          <div class="error">
+            <h3>Error Loading Post</h3>
+            <p>${error.message}</p>
+            <a href="/posts" class="button">Back to Posts</a>
+          </div>
+        `;
+      }
+    }
+
+    function renderEditor(post) {
+      const container = document.getElementById("postEditor");
+      const isPublished = post.status === "published";
+
+      container.innerHTML = `
+        <div class="post-details">
+          <div class="detail-header">
+            <h2>${post.trend_title || "Untitled Post"}</h2>
+            <span class="tag ${getStatusColor(post.status)}">${post.status}</span>
+          </div>
+
+          ${post.trend_url ? `
+            <div class="detail-meta">
+              <strong>Source:</strong>
+              <a href="${post.trend_url}" target="_blank" rel="noopener">${post.trend_url}</a>
+            </div>
+          ` : ""}
+
+          <form id="editForm" ${isPublished ? 'style="pointer-events: none; opacity: 0.6;"' : ""}>
+            <div class="form-group">
+              <label for="content">Post Content</label>
+              <textarea
+                id="content"
+                rows="12"
+                ${isPublished ? "readonly" : ""}
+              >${post.content}</textarea>
+              <div class="char-count">
+                <span id="charCount">0</span> / 3000 characters
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="hashtags">Hashtags (optional)</label>
+              <input
+                type="text"
+                id="hashtags"
+                placeholder="#AI #MachineLearning #Tech"
+                value="${post.hashtags || ""}"
+                ${isPublished ? "readonly" : ""}
+              />
+            </div>
+
+            ${isPublished ? `
+              <div class="info-box">
+                <strong>Post Published</strong>
+                <p>This post has been published and cannot be edited.</p>
+                ${post.post_url ? `
+                  <a href="${post.post_url}" target="_blank" class="button">View on LinkedIn</a>
+                ` : ""}
+              </div>
+            ` : `
+              <div class="form-actions">
+                <button type="submit" class="button">Save Changes</button>
+                ${post.status === "pending" ? `
+                  <button type="button" class="button" onclick="approvePost()">Approve</button>
+                ` : ""}
+                ${post.status === "approved" ? `
+                  <button type="button" class="button" onclick="publishPost()">Publish to LinkedIn</button>
+                ` : ""}
+                <a href="/posts" class="button secondary">Back to Posts</a>
+              </div>
+            `}
+          </form>
+
+          <div class="post-meta-section">
+            <h3>Post Information</h3>
+            <div class="meta-grid">
+              <div><strong>Created:</strong> ${formatDate(post.created_at)}</div>
+              ${post.published_at ? `<div><strong>Published:</strong> ${formatDate(post.published_at)}</div>` : ""}
+              ${post.platform_post_id ? `<div><strong>LinkedIn ID:</strong> ${post.platform_post_id}</div>` : ""}
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Character counter
+      const textarea = document.getElementById("content");
+      const charCount = document.getElementById("charCount");
+
+      function updateCharCount() {
+        charCount.textContent = textarea.value.length;
+        if (textarea.value.length > 3000) {
+          charCount.style.color = "var(--accent-2)";
+        } else {
+          charCount.style.color = "var(--muted)";
+        }
+      }
+
+      updateCharCount();
+      textarea.addEventListener("input", updateCharCount);
+
+      // Form submit
+      if (!isPublished) {
+        document.getElementById("editForm").addEventListener("submit", async (e) => {
+          e.preventDefault();
+          await savePost();
+        });
+      }
+    }
+
+    async function savePost() {
+      const content = document.getElementById("content").value;
+      const hashtags = document.getElementById("hashtags").value;
+
+      if (!content.trim()) {
+        alert("Post content cannot be empty");
+        return;
+      }
+
+      if (content.length > 3000) {
+        alert("Post content exceeds 3000 characters");
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE}/api/posts/${POST_ID}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content, hashtags })
+        });
+
+        if (!response.ok) throw new Error("Failed to save post");
+
+        alert("Post saved successfully!");
+        loadPost(); // Reload to show updated data
+      } catch (error) {
+        alert(`Error: ${error.message}`);
+      }
+    }
+
+    window.approvePost = async function() {
+      if (!confirm("Approve this post for publishing?")) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/posts/${POST_ID}/approve`, {
+          method: "POST"
+        });
+
+        if (!response.ok) throw new Error("Failed to approve post");
+
+        alert("Post approved!");
+        loadPost();
+      } catch (error) {
+        alert(`Error: ${error.message}`);
+      }
+    };
+
+    window.publishPost = async function() {
+      if (!confirm("Publish this post to LinkedIn?\n\nMake sure you've saved any changes first.")) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/posts/${POST_ID}/publish`, {
+          method: "POST"
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || "Failed to publish");
+        }
+
+        const result = await response.json();
+        alert("Post published successfully to LinkedIn!");
+        loadPost();
+      } catch (error) {
+        alert(`Error: ${error.message}`);
+      }
+    };
+
+    function getStatusColor(status) {
+      const colors = {
+        pending: "orange",
+        approved: "blue",
+        published: "green",
+        rejected: "red"
+      };
+      return colors[status] || "";
+    }
+
+    function formatDate(dateString) {
+      if (!dateString) return "";
+      const date = new Date(dateString);
+      return date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+
+    // Load post on page load
+    loadPost();
+  </script>
+
+  <style>
+    .post-details {
+      max-width: 800px;
+    }
+
+    .detail-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 16px;
+    }
+
+    .detail-meta {
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+    }
+
+    .detail-meta a {
+      color: var(--accent);
+      word-break: break-all;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    .form-group textarea,
+    .form-group input {
+      width: 100%;
+      font-family: inherit;
+    }
+
+    .char-count {
+      text-align: right;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .form-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 24px;
+    }
+
+    .info-box {
+      background: #e6f0ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 24px 0;
+    }
+
+    .info-box strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--ink);
+    }
+
+    .info-box p {
+      margin: 0 0 12px 0;
+      color: var(--muted);
+    }
+
+    .post-meta-section {
+      margin-top: 32px;
+      padding-top: 24px;
+      border-top: 1px solid var(--line);
+    }
+
+    .post-meta-section h3 {
+      margin-bottom: 12px;
+      font-size: 1rem;
+    }
+
+    .meta-grid {
+      display: grid;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .error {
+      text-align: center;
+      padding: 40px;
+    }
+
+    .error h3 {
+      color: var(--accent-2);
+      margin-bottom: 12px;
+    }
+
+    .tag.green {
+      background: #e6f7f0;
+      color: #047857;
+    }
+
+    .tag.blue {
+      background: #e6f0ff;
+      color: #1e40af;
+    }
+
+    .tag.orange {
+      background: #fff4e6;
+      color: #d97706;
+    }
+  </style>
+</Base>

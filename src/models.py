@@ -6,7 +6,7 @@ These models define the structure of data stored in the database.
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, HttpUrl
 
 
@@ -91,3 +91,28 @@ class PublishingHistory(BaseModel):
     last_metrics_update: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class QueryRun(BaseModel):
+    """Model for tracking a query run from the web UI"""
+    id: Optional[int] = None
+    keywords_raw: str = Field(default="", max_length=2000)
+    phrases: List[str] = Field(default_factory=list)
+    sources: List[str] = Field(default_factory=list)
+    options: Dict[str, Any] = Field(default_factory=dict)
+    status: str = Field(default="queued", max_length=20)
+    error_message: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: Optional[datetime] = None
+
+
+class QueryRunTrend(BaseModel):
+    """Model for a trend included in a query run"""
+    id: Optional[int] = None
+    query_run_id: int
+    trend_id: int
+    match_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    matched_terms: List[str] = Field(default_factory=list)
+    match_fields: Dict[str, str] = Field(default_factory=dict)
+    rank: int = Field(default=0, ge=0)
+    created_at: datetime = Field(default_factory=datetime.utcnow)

@@ -1,0 +1,106 @@
+---
+import Base from "../../layouts/Base.astro";
+
+const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
+const { id } = Astro.params;
+---
+<Base title={`Trend Signal Studio · Run ${id}`}>
+  <section class="hero">
+    <h1>Run #{id}</h1>
+    <p>Inspect the matched trends and move into writing when ready.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Run status</h2>
+    <div class="status">
+      Status:
+      <strong id="runStatus">Loading</strong>
+      <span id="runMeta" class="mono"></span>
+    </div>
+  </section>
+
+  <section class="panel" style="margin-top:24px;">
+    <h2>Matched trends</h2>
+    <div id="results" class="results"></div>
+  </section>
+
+  <script define:vars={{ apiBase, id }}>
+    const API_BASE = apiBase;
+    const RUN_ID = id;
+    const statusEl = document.getElementById("runStatus");
+    const metaEl = document.getElementById("runMeta");
+    const resultsEl = document.getElementById("results");
+
+    const renderResults = (results) => {
+      resultsEl.innerHTML = "";
+      if (!results.length) {
+        const empty = document.createElement("p");
+        empty.textContent = "No matches yet.";
+        empty.className = "mono";
+        resultsEl.appendChild(empty);
+        return;
+      }
+
+      results.forEach((item) => {
+        const card = document.createElement("div");
+        card.className = "card";
+
+        const title = document.createElement("h3");
+        title.textContent = item.title || "Untitled";
+        card.appendChild(title);
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = `${item.source_name || "Unknown Source"} · score ${item.match_score}`;
+        card.appendChild(meta);
+
+        if (item.description) {
+          const desc = document.createElement("p");
+          desc.textContent = item.description.slice(0, 220);
+          card.appendChild(desc);
+        }
+
+        const tags = document.createElement("div");
+        tags.className = "meta";
+        (item.matched_terms || []).slice(0, 6).forEach((term) => {
+          const tag = document.createElement("span");
+          tag.className = "tag";
+          tag.textContent = term;
+          tags.appendChild(tag);
+        });
+        card.appendChild(tags);
+
+        if (item.source_url) {
+          const link = document.createElement("a");
+          link.href = item.source_url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.className = "tag orange";
+          link.textContent = "Open source";
+          card.appendChild(link);
+        }
+
+        resultsEl.appendChild(card);
+      });
+    };
+
+    const loadRun = async () => {
+      const statusRes = await fetch(`${API_BASE}/api/query-runs/${RUN_ID}`);
+      if (!statusRes.ok) {
+        statusEl.textContent = "Not found";
+        return;
+      }
+      const status = await statusRes.json();
+      statusEl.textContent = status.status;
+      metaEl.textContent = status.status === "complete" ? `run #${RUN_ID}` : "";
+
+      const resultsRes = await fetch(`${API_BASE}/api/query-runs/${RUN_ID}/results`);
+      if (resultsRes.ok) {
+        const data = await resultsRes.json();
+        renderResults(data.results || []);
+      }
+    };
+
+    loadRun();
+  </script>
+</Base>

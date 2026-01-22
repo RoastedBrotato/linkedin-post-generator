@@ -1,0 +1,80 @@
+---
+import Base from "../layouts/Base.astro";
+
+const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
+---
+<Base title="Trend Signal Studio · History">
+  <section class="hero">
+    <h1>Query history</h1>
+    <p>Review past research runs and revisit the signals you pulled.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Recent runs</h2>
+    <div id="history" class="results"></div>
+  </section>
+
+  <script define:vars={{ apiBase }}>
+    const API_BASE = apiBase;
+    const historyEl = document.getElementById("history");
+
+    const renderHistory = (runs) => {
+      historyEl.innerHTML = "";
+      if (!runs.length) {
+        const empty = document.createElement("p");
+        empty.textContent = "No runs yet. Start a query from the Research page.";
+        empty.className = "mono";
+        historyEl.appendChild(empty);
+        return;
+      }
+
+      runs.forEach((run) => {
+        const card = document.createElement("div");
+        card.className = "card";
+
+        const title = document.createElement("h3");
+        title.textContent = run.keywords_raw || "Untitled query";
+        card.appendChild(title);
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        const sources = Array.isArray(run.sources) ? run.sources : [];
+        meta.textContent = `status ${run.status} · ${sources.join(", ") || "all sources"}`;
+        card.appendChild(meta);
+
+        const phrases = Array.isArray(run.phrases) ? run.phrases : [];
+        if (phrases.length) {
+          const tags = document.createElement("div");
+          tags.className = "meta";
+          phrases.slice(0, 6).forEach((phrase) => {
+            const tag = document.createElement("span");
+            tag.className = "tag";
+            tag.textContent = phrase;
+            tags.appendChild(tag);
+          });
+          card.appendChild(tags);
+        }
+
+        const link = document.createElement("a");
+        link.href = `/runs/${run.id}`;
+        link.className = "tag orange";
+        link.textContent = `Open run #${run.id}`;
+        card.appendChild(link);
+
+        historyEl.appendChild(card);
+      });
+    };
+
+    const loadHistory = async () => {
+      const response = await fetch(`${API_BASE}/api/query-runs`);
+      if (!response.ok) {
+        historyEl.textContent = "Unable to load history.";
+        return;
+      }
+      const data = await response.json();
+      renderHistory(data.results || []);
+    };
+
+    loadHistory();
+  </script>
+</Base>

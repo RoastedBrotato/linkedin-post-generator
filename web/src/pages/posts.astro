@@ -1,0 +1,276 @@
+---
+import Base from "../layouts/Base.astro";
+
+const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
+---
+<Base title="Posts - BrotatosLab">
+  <section class="hero">
+    <h1>Post Management</h1>
+    <p>Generate, edit, and publish your LinkedIn posts</p>
+  </section>
+
+  <section class="panel">
+    <div class="tabs">
+      <button class="tab active" data-status="all">All Posts</button>
+      <button class="tab" data-status="pending">Pending</button>
+      <button class="tab" data-status="approved">Approved</button>
+      <button class="tab" data-status="published">Published</button>
+    </div>
+
+    <div id="postsContainer" class="posts-list"></div>
+  </section>
+
+  <script define:vars={{ apiBase }}>
+    const API_BASE = apiBase;
+    let currentStatus = "all";
+
+    async function loadPosts(status = null) {
+      const container = document.getElementById("postsContainer");
+      container.innerHTML = '<p class="mono">Loading posts...</p>';
+
+      try {
+        const url = status && status !== "all"
+          ? `${API_BASE}/api/posts?status=${status}`
+          : `${API_BASE}/api/posts`;
+
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("Failed to load posts");
+
+        const posts = await response.json();
+        renderPosts(posts);
+      } catch (error) {
+        container.innerHTML = `<p class="mono" style="color: var(--accent-2);">Error: ${error.message}</p>`;
+      }
+    }
+
+    function renderPosts(posts) {
+      const container = document.getElementById("postsContainer");
+
+      if (!posts.length) {
+        container.innerHTML = '<p class="mono">No posts found.</p>';
+        return;
+      }
+
+      container.innerHTML = posts.map(post => `
+        <div class="card post-card" data-post-id="${post.id}">
+          <div class="post-header">
+            <h3>${post.trend_title || "Untitled Post"}</h3>
+            <span class="tag ${getStatusColor(post.status)}">${post.status}</span>
+          </div>
+
+          <div class="post-content">
+            <p>${truncate(post.content, 200)}</p>
+          </div>
+
+          ${post.hashtags ? `<div class="post-hashtags">${post.hashtags}</div>` : ""}
+
+          <div class="post-meta">
+            <span class="mono">Created: ${formatDate(post.created_at)}</span>
+            ${post.published_at ? `<span class="mono">Published: ${formatDate(post.published_at)}</span>` : ""}
+          </div>
+
+          <div class="post-actions">
+            <button class="button secondary small" onclick="viewPost(${post.id})">
+              ${post.status === "published" ? "View" : "Edit"}
+            </button>
+            ${post.status === "pending" ? `
+              <button class="button small" onclick="approvePost(${post.id})">Approve</button>
+            ` : ""}
+            ${post.status === "approved" ? `
+              <button class="button small" onclick="publishPost(${post.id})">Publish to LinkedIn</button>
+            ` : ""}
+            ${post.post_url ? `
+              <a href="${post.post_url}" target="_blank" class="button secondary small">View on LinkedIn</a>
+            ` : ""}
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function getStatusColor(status) {
+      const colors = {
+        pending: "orange",
+        approved: "blue",
+        published: "green",
+        rejected: "red"
+      };
+      return colors[status] || "";
+    }
+
+    function truncate(text, length) {
+      if (!text) return "";
+      return text.length > length ? text.substring(0, length) + "..." : text;
+    }
+
+    function formatDate(dateString) {
+      if (!dateString) return "";
+      const date = new Date(dateString);
+      return date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+
+    window.viewPost = function(postId) {
+      window.location.href = `/posts/${postId}`;
+    };
+
+    window.approvePost = async function(postId) {
+      if (!confirm("Approve this post for publishing?")) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/posts/${postId}/approve`, {
+          method: "POST"
+        });
+
+        if (!response.ok) throw new Error("Failed to approve post");
+
+        alert("Post approved!");
+        loadPosts(currentStatus);
+      } catch (error) {
+        alert(`Error: ${error.message}`);
+      }
+    };
+
+    window.publishPost = async function(postId) {
+      if (!confirm("Publish this post to LinkedIn?")) return;
+
+      const button = event.target;
+      button.disabled = true;
+      button.textContent = "Publishing...";
+
+      try {
+        const response = await fetch(`${API_BASE}/api/posts/${postId}/publish`, {
+          method: "POST"
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || "Failed to publish");
+        }
+
+        const result = await response.json();
+        alert("Post published successfully to LinkedIn!");
+        loadPosts(currentStatus);
+      } catch (error) {
+        alert(`Error: ${error.message}`);
+        button.disabled = false;
+        button.textContent = "Publish to LinkedIn";
+      }
+    };
+
+    // Tab switching
+    document.querySelectorAll(".tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+        tab.classList.add("active");
+
+        const status = tab.dataset.status;
+        currentStatus = status;
+        loadPosts(status === "all" ? null : status);
+      });
+    });
+
+    // Load posts on page load
+    loadPosts();
+  </script>
+
+  <style>
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 8px;
+    }
+
+    .tab {
+      padding: 8px 16px;
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: "Space Grotesk", sans-serif;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+
+    .tab:hover {
+      color: var(--ink);
+    }
+
+    .tab.active {
+      color: var(--accent);
+      border-bottom: 2px solid var(--accent);
+    }
+
+    .posts-list {
+      display: grid;
+      gap: 16px;
+    }
+
+    .post-card {
+      padding: 20px;
+    }
+
+    .post-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 12px;
+    }
+
+    .post-header h3 {
+      margin: 0;
+      font-size: 1.1rem;
+    }
+
+    .post-content {
+      margin-bottom: 12px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .post-hashtags {
+      color: var(--accent);
+      font-size: 0.9rem;
+      margin-bottom: 12px;
+    }
+
+    .post-meta {
+      display: flex;
+      gap: 16px;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    .post-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .button.small {
+      padding: 6px 12px;
+      font-size: 0.9rem;
+    }
+
+    .tag.green {
+      background: #e6f7f0;
+      color: #047857;
+    }
+
+    .tag.blue {
+      background: #e6f0ff;
+      color: #1e40af;
+    }
+
+    .tag.orange {
+      background: #fff4e6;
+      color: #d97706;
+    }
+
+    .tag.red {
+      background: #ffe6e6;
+      color: #dc2626;
+    }
+  </style>
+</Base>
