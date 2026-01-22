@@ -1,16 +1,14 @@
 ---
 import Base from "../layouts/Base.astro";
+import PageHero from "../components/PageHero.astro";
 
 const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
 ---
 <Base title="BrotatosLab">
-  <section class="hero">
-    <h1>Build a research feed from your keywords.</h1>
-    <p>
-      Pick sources, add phrases, and assemble a curated trend stream. Generate posts later
-      if you need them.
-    </p>
-  </section>
+  <PageHero
+    title="Build a research feed from your keywords."
+    subtitle="Pick sources, add phrases, and assemble a curated trend stream. Generate posts later if you need them."
+  />
 
   <section class="panel">
     <h2>Research Query</h2>
@@ -35,7 +33,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
       </div>
 
       <div class="grid grid-2">
-        <div class="panel" style="box-shadow:none;">
+        <div class="panel subtle">
           <h3>Sources</h3>
           <div class="grid">
             <label class="toggle">
@@ -52,7 +50,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
             </label>
           </div>
         </div>
-        <div class="panel" style="box-shadow:none;">
+        <div class="panel subtle">
           <h3>Options</h3>
           <div class="grid">
             <div class="grid grid-2">
@@ -107,7 +105,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
     </form>
   </section>
 
-  <section class="panel" style="margin-top:24px;">
+  <section class="panel spaced">
     <h2>Results</h2>
     <div class="status">
       Run status:

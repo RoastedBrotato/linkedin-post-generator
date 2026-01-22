@@ -1,13 +1,14 @@
 ---
 import Base from "../layouts/Base.astro";
+import PageHero from "../components/PageHero.astro";
 
 const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
 ---
 <Base title="Trend Signal Studio · History">
-  <section class="hero">
-    <h1>Query history</h1>
-    <p>Review past research runs and revisit the signals you pulled.</p>
-  </section>
+  <PageHero
+    title="Query history"
+    subtitle="Review past research runs and revisit the signals you pulled."
+  />
 
   <section class="panel">
     <h2>Recent runs</h2>

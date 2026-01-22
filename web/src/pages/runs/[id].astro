@@ -1,14 +1,15 @@
 ---
 import Base from "../../layouts/Base.astro";
+import PageHero from "../../components/PageHero.astro";
 
 const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
 const { id } = Astro.params;
 ---
 <Base title={`Trend Signal Studio · Run ${id}`}>
-  <section class="hero">
-    <h1>Run #{id}</h1>
-    <p>Inspect the matched trends and move into writing when ready.</p>
-  </section>
+  <PageHero
+    title={`Run #${id}`}
+    subtitle="Inspect the matched trends and move into writing when ready."
+  />
 
   <section class="panel">
     <h2>Run status</h2>
@@ -19,7 +20,7 @@ const { id } = Astro.params;
     </div>
   </section>
 
-  <section class="panel" style="margin-top:24px;">
+  <section class="panel spaced">
     <h2>Matched trends</h2>
     <div id="results" class="results"></div>
   </section>

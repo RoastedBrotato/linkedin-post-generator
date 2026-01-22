@@ -11,6 +11,16 @@
   --card: #ffffff;
   --line: rgba(21, 23, 28, 0.12);
   --shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+  --tag-green-bg: rgba(16, 185, 129, 0.14);
+  --tag-green: #047857;
+  --tag-blue-bg: rgba(59, 130, 246, 0.14);
+  --tag-blue: #1e3a8a;
+  --tag-orange-bg: rgba(234, 88, 12, 0.14);
+  --tag-orange: #c2410c;
+  --tag-red-bg: rgba(239, 68, 68, 0.14);
+  --tag-red: #b91c1c;
+  --info-bg: rgba(59, 91, 253, 0.12);
+  --info-border: rgba(59, 91, 253, 0.25);
 }
 
 :root[data-theme="dark"] {
@@ -24,6 +34,16 @@
   --card: #151922;
   --line: rgba(226, 232, 240, 0.12);
   --shadow: 0 18px 30px rgba(0, 0, 0, 0.35);
+  --tag-green-bg: rgba(16, 185, 129, 0.2);
+  --tag-green: #6ee7b7;
+  --tag-blue-bg: rgba(59, 130, 246, 0.2);
+  --tag-blue: #93c5fd;
+  --tag-orange-bg: rgba(234, 88, 12, 0.2);
+  --tag-orange: #fdba74;
+  --tag-red-bg: rgba(239, 68, 68, 0.2);
+  --tag-red: #fca5a5;
+  --info-bg: rgba(138, 160, 255, 0.18);
+  --info-border: rgba(138, 160, 255, 0.35);
 }
 
 * {
@@ -51,7 +71,6 @@ a {
 
 .site-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
@@ -127,6 +146,15 @@ a {
   border-radius: 16px;
   padding: 24px;
   box-shadow: var(--shadow);
+}
+
+.panel.spaced {
+  margin-top: 24px;
+}
+
+.panel.subtle {
+  box-shadow: none;
+  background: transparent;
 }
 
 .panel h2 {
@@ -287,8 +315,23 @@ textarea {
 }
 
 .tag.orange {
-  background: rgba(226, 232, 240, 0.25);
-  color: var(--accent-2);
+  background: var(--tag-orange-bg);
+  color: var(--tag-orange);
+}
+
+.tag.green {
+  background: var(--tag-green-bg);
+  color: var(--tag-green);
+}
+
+.tag.blue {
+  background: var(--tag-blue-bg);
+  color: var(--tag-blue);
+}
+
+.tag.red {
+  background: var(--tag-red-bg);
+  color: var(--tag-red);
 }
 
 .mono {
@@ -299,6 +342,176 @@ textarea {
   margin-top: 32px;
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+
+.tab {
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 600;
+  transition: color 0.2s ease, border-color 0.2s ease;
+  border-bottom: 2px solid transparent;
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.tab.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.posts-list {
+  display: grid;
+  gap: 16px;
+}
+
+.post-card {
+  padding: 20px;
+}
+
+.post-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.post-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.post-content {
+  margin-bottom: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.post-hashtags {
+  color: var(--accent);
+  font-size: 0.9rem;
+  margin-bottom: 12px;
+}
+
+.post-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+
+.post-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.post-details {
+  max-width: 800px;
+}
+
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.detail-meta {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.detail-meta a {
+  color: var(--accent);
+  word-break: break-all;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.char-count {
+  text-align: right;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
+.info-box {
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 24px 0;
+}
+
+.info-box strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--ink);
+}
+
+.info-box p {
+  margin: 0 0 12px 0;
+  color: var(--muted);
+}
+
+.post-meta-section {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.post-meta-section h3 {
+  margin-bottom: 12px;
+  font-size: 1rem;
+}
+
+.meta-grid {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.error {
+  text-align: center;
+  padding: 40px;
+}
+
+.error h3 {
+  color: var(--accent-2);
+  margin-bottom: 12px;
 }
 
 @media (max-width: 720px) {

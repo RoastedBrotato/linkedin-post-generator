@@ -22,15 +22,27 @@ _POST_EXECUTOR = ThreadPoolExecutor(max_workers=2)
 
 app = FastAPI(title="LinkedIn Post Generator API")
 
-raw_origins = os.getenv(
-    "WEB_UI_ORIGINS",
-    "http://localhost:4321,http://127.0.0.1:4321,http://localhost:3000",
-)
+raw_origins = os.getenv("WEB_UI_ORIGINS", "")
 allowed_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+
+# Allow common local dev origins if not explicitly configured.
+if not allowed_origins:
+    allowed_origins = [
+        "http://localhost:4321",
+        "http://127.0.0.1:4321",
+        "http://localhost:4322",
+        "http://127.0.0.1:4322",
+        "http://localhost:3000",
+    ]
+    # Accept any localhost port in dev to avoid CORS mismatches.
+    allowed_origin_regex = r"https?://(localhost|127\.0\.0\.1)(:\\d+)?"
+else:
+    allowed_origin_regex = None
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

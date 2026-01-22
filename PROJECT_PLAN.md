@@ -108,7 +108,7 @@ Automated system for researching AI and tech trends, generating grounded LinkedI
 
 ---
 
-### 5. LinkedIn API Integration (`src/linkedin.py`)
+### 5. LinkedIn API Integration (`src/linkedin_api.py`)
 **Purpose**: Authenticate and publish approved posts to LinkedIn
 
 **Sub-components**:

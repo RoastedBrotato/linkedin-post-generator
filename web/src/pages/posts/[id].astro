@@ -1,14 +1,15 @@
 ---
 import Base from "../../layouts/Base.astro";
+import PageHero from "../../components/PageHero.astro";
 
 const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
 const { id } = Astro.params;
 ---
 <Base title="Edit Post - BrotatosLab">
-  <section class="hero">
-    <h1>Edit Post</h1>
-    <p>Review and edit your post before publishing</p>
-  </section>
+  <PageHero
+    title="Edit post"
+    subtitle="Review and edit your post before publishing."
+  />
 
   <section class="panel">
     <div id="postEditor">
@@ -230,120 +231,5 @@ const { id } = Astro.params;
     loadPost();
   </script>
 
-  <style>
-    .post-details {
-      max-width: 800px;
-    }
-
-    .detail-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: start;
-      margin-bottom: 16px;
-    }
-
-    .detail-meta {
-      margin-bottom: 24px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--line);
-      color: var(--muted);
-    }
-
-    .detail-meta a {
-      color: var(--accent);
-      word-break: break-all;
-    }
-
-    .form-group {
-      margin-bottom: 20px;
-    }
-
-    .form-group label {
-      display: block;
-      margin-bottom: 8px;
-      font-weight: 600;
-    }
-
-    .form-group textarea,
-    .form-group input {
-      width: 100%;
-      font-family: inherit;
-    }
-
-    .char-count {
-      text-align: right;
-      font-size: 0.85rem;
-      color: var(--muted);
-      margin-top: 4px;
-    }
-
-    .form-actions {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-top: 24px;
-    }
-
-    .info-box {
-      background: #e6f0ff;
-      border: 1px solid #bfdbfe;
-      border-radius: 8px;
-      padding: 16px;
-      margin: 24px 0;
-    }
-
-    .info-box strong {
-      display: block;
-      margin-bottom: 8px;
-      color: var(--ink);
-    }
-
-    .info-box p {
-      margin: 0 0 12px 0;
-      color: var(--muted);
-    }
-
-    .post-meta-section {
-      margin-top: 32px;
-      padding-top: 24px;
-      border-top: 1px solid var(--line);
-    }
-
-    .post-meta-section h3 {
-      margin-bottom: 12px;
-      font-size: 1rem;
-    }
-
-    .meta-grid {
-      display: grid;
-      gap: 8px;
-      color: var(--muted);
-      font-size: 0.9rem;
-    }
-
-    .error {
-      text-align: center;
-      padding: 40px;
-    }
-
-    .error h3 {
-      color: var(--accent-2);
-      margin-bottom: 12px;
-    }
-
-    .tag.green {
-      background: #e6f7f0;
-      color: #047857;
-    }
-
-    .tag.blue {
-      background: #e6f0ff;
-      color: #1e40af;
-    }
-
-    .tag.orange {
-      background: #fff4e6;
-      color: #d97706;
-    }
-  </style>
+  
 </Base>
