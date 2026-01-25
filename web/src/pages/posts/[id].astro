@@ -85,6 +85,35 @@ const { id } = Astro.params;
               />
             </div>
 
+            <div class="form-group">
+              <label>Image Attachment (optional)</label>
+              <div class="image-upload-section">
+                ${post.image_path ? `
+                  <div id="imagePreview" class="image-preview">
+                    <img src="${API_BASE}/api/images/${getImageFilename(post.image_path)}" alt="Post image" />
+                    <button type="button" class="button secondary" onclick="deleteImage()" ${isPublished ? "disabled" : ""}>
+                      Remove Image
+                    </button>
+                  </div>
+                ` : `
+                  <div id="imageUploadArea">
+                    <input
+                      type="file"
+                      id="imageInput"
+                      accept="image/jpeg,image/jpg,image/png"
+                      ${isPublished ? "disabled" : ""}
+                      style="display: none;"
+                    />
+                    <button type="button" class="button secondary" onclick="document.getElementById('imageInput').click()" ${isPublished ? "disabled" : ""}>
+                      Choose Image
+                    </button>
+                    <p class="help-text">JPG or PNG, max 10MB</p>
+                    <div id="uploadStatus" class="upload-status"></div>
+                  </div>
+                `}
+              </div>
+            </div>
+
             ${isPublished ? `
               <div class="info-box">
                 <strong>Post Published</strong>
@@ -100,7 +129,20 @@ const { id } = Astro.params;
                   <button type="button" class="button" onclick="approvePost()">Approve</button>
                 ` : ""}
                 ${post.status === "approved" ? `
-                  <button type="button" class="button" onclick="publishPost()">Publish to LinkedIn</button>
+                  <div class="publish-section">
+                    <button type="button" class="button" onclick="publishPost()">Publish Now</button>
+                    <button type="button" class="button secondary" onclick="toggleSchedule()">Schedule for Later</button>
+                  </div>
+                  <div id="scheduleSection" class="schedule-section" style="display: none;">
+                    <label for="scheduleTime">Schedule for:</label>
+                    <input
+                      type="datetime-local"
+                      id="scheduleTime"
+                      min="${new Date().toISOString().slice(0, 16)}"
+                    />
+                    <button type="button" class="button" onclick="schedulePost()">Schedule Post</button>
+                    <button type="button" class="button secondary" onclick="toggleSchedule()">Cancel</button>
+                  </div>
                 ` : ""}
                 <a href="/posts" class="button secondary">Back to Posts</a>
               </div>
@@ -113,6 +155,14 @@ const { id } = Astro.params;
               <div><strong>Created:</strong> ${formatDate(post.created_at)}</div>
               ${post.published_at ? `<div><strong>Published:</strong> ${formatDate(post.published_at)}</div>` : ""}
               ${post.platform_post_id ? `<div><strong>LinkedIn ID:</strong> ${post.platform_post_id}</div>` : ""}
+              ${post.is_scheduled && post.scheduled_for ? `
+                <div class="scheduled-info">
+                  <strong>Scheduled for:</strong> ${formatDate(post.scheduled_for)}
+                  ${!isPublished ? `
+                    <button type="button" class="button secondary small" onclick="unschedulePost()">Unschedule</button>
+                  ` : ""}
+                </div>
+              ` : ""}
             </div>
           </div>
         </div>
@@ -140,6 +190,17 @@ const { id } = Astro.params;
           e.preventDefault();
           await savePost();
         });
+
+        // Image upload handler
+        const imageInput = document.getElementById("imageInput");
+        if (imageInput) {
+          imageInput.addEventListener("change", async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+              await uploadImage(file);
+            }
+          });
+        }
       }
     }
 
@@ -211,6 +272,136 @@ const { id } = Astro.params;
       }
     };
 
+    async function uploadImage(file) {
+      const uploadStatus = document.getElementById("uploadStatus");
+
+      // Validate file size (10MB max)
+      const maxSize = 10 * 1024 * 1024;
+      if (file.size > maxSize) {
+        uploadStatus.innerHTML = '<p class="error">File too large. Maximum size is 10MB.</p>';
+        return;
+      }
+
+      // Validate file type
+      if (!['image/jpeg', 'image/jpg', 'image/png'].includes(file.type)) {
+        uploadStatus.innerHTML = '<p class="error">Invalid file type. Only JPG and PNG are allowed.</p>';
+        return;
+      }
+
+      uploadStatus.innerHTML = '<p class="mono">Uploading image...</p>';
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const response = await fetch(`${API_BASE}/api/posts/${POST_ID}/upload-image`, {
+          method: "POST",
+          body: formData
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || "Failed to upload image");
+        }
+
+        uploadStatus.innerHTML = '<p class="success">Image uploaded successfully!</p>';
+        setTimeout(() => {
+          loadPost(); // Reload to show the image
+        }, 1000);
+      } catch (error) {
+        uploadStatus.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+      }
+    }
+
+    window.deleteImage = async function() {
+      if (!confirm("Delete this image?")) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/posts/${POST_ID}/image`, {
+          method: "DELETE"
+        });
+
+        if (!response.ok) throw new Error("Failed to delete image");
+
+        alert("Image deleted successfully!");
+        loadPost();
+      } catch (error) {
+        alert(`Error: ${error.message}`);
+      }
+    };
+
+    window.toggleSchedule = function() {
+      const scheduleSection = document.getElementById("scheduleSection");
+      if (scheduleSection.style.display === "none") {
+        scheduleSection.style.display = "block";
+        // Set default time to tomorrow at current time
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        document.getElementById("scheduleTime").value = tomorrow.toISOString().slice(0, 16);
+      } else {
+        scheduleSection.style.display = "none";
+      }
+    };
+
+    window.schedulePost = async function() {
+      const scheduleTime = document.getElementById("scheduleTime").value;
+
+      if (!scheduleTime) {
+        alert("Please select a date and time");
+        return;
+      }
+
+      const scheduledDateTime = new Date(scheduleTime);
+      const now = new Date();
+
+      if (scheduledDateTime <= now) {
+        alert("Scheduled time must be in the future");
+        return;
+      }
+
+      if (!confirm(`Schedule this post for ${scheduledDateTime.toLocaleString()}?`)) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/posts/${POST_ID}/schedule`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            scheduled_time: scheduledDateTime.toISOString()
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || "Failed to schedule post");
+        }
+
+        alert("Post scheduled successfully!");
+        loadPost();
+      } catch (error) {
+        alert(`Error: ${error.message}`);
+      }
+    };
+
+    window.unschedulePost = async function() {
+      if (!confirm("Cancel the scheduled publication of this post?")) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/posts/${POST_ID}/schedule`, {
+          method: "DELETE"
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || "Failed to unschedule post");
+        }
+
+        alert("Post unscheduled successfully!");
+        loadPost();
+      } catch (error) {
+        alert(`Error: ${error.message}`);
+      }
+    };
+
     function getStatusColor(status) {
       const colors = {
         pending: "orange",
@@ -227,9 +418,106 @@ const { id } = Astro.params;
       return date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     }
 
+    function getImageFilename(imagePath) {
+      if (!imagePath) return "";
+      const parts = imagePath.split('/');
+      return parts[parts.length - 1];
+    }
+
     // Load post on page load
     loadPost();
   </script>
 
-  
+  <style>
+    .image-upload-section {
+      margin-top: 0.5rem;
+    }
+
+    .image-preview {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      background: var(--bg-light);
+    }
+
+    .image-preview img {
+      max-width: 100%;
+      max-height: 400px;
+      display: block;
+      margin-bottom: 1rem;
+      border-radius: 4px;
+    }
+
+    #imageUploadArea {
+      padding: 1.5rem;
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      text-align: center;
+      background: var(--bg-light);
+    }
+
+    #imageUploadArea .help-text {
+      margin-top: 0.5rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .upload-status {
+      margin-top: 1rem;
+    }
+
+    .upload-status .success {
+      color: var(--accent-green);
+    }
+
+    .upload-status .error {
+      color: var(--accent-2);
+    }
+
+    .publish-section {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .schedule-section {
+      margin-top: 1rem;
+      padding: 1rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-light);
+    }
+
+    .schedule-section label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: bold;
+    }
+
+    .schedule-section input[type="datetime-local"] {
+      width: 100%;
+      max-width: 300px;
+      padding: 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      margin-bottom: 0.5rem;
+      background: var(--bg);
+      color: var(--fg);
+    }
+
+    .schedule-section button {
+      margin-right: 0.5rem;
+    }
+
+    .scheduled-info {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .scheduled-info .button.small {
+      padding: 0.25rem 0.5rem;
+      font-size: 0.85rem;
+    }
+  </style>
 </Base>

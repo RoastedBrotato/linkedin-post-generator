@@ -8,8 +8,9 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from src.database import get_db
@@ -17,10 +18,35 @@ from src.api.query_runner import enqueue_query_run
 from src.llm import LLMClient
 from src.linkedin_api import LinkedInAPI
 from src.logger import logger
+from src.scheduler import get_scheduler, start_scheduler, stop_scheduler
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 _POST_EXECUTOR = ThreadPoolExecutor(max_workers=2)
 
 app = FastAPI(title="LinkedIn Post Generator API")
+
+# Start scheduler on startup
+@app.on_event("startup")
+async def startup_event():
+    """Start the post scheduler when API starts"""
+    try:
+        start_scheduler()
+        logger.info("Post scheduler started")
+    except Exception as e:
+        logger.error(f"Failed to start scheduler: {e}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop the scheduler when API shuts down"""
+    try:
+        stop_scheduler()
+        logger.info("Post scheduler stopped")
+    except Exception as e:
+        logger.error(f"Failed to stop scheduler: {e}")
 
 raw_origins = os.getenv("WEB_UI_ORIGINS", "")
 allowed_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
@@ -89,6 +115,24 @@ def _parse_query_run(row: Dict[str, Any]) -> QueryRunResponse:
 def health_check() -> Dict[str, str]:
     """Simple health endpoint."""
     return {"status": "ok"}
+
+
+@app.get("/api/images/{filename}")
+def get_image(filename: str):
+    """Serve uploaded images."""
+    image_path = os.path.join("data", "images", filename)
+
+    if not os.path.exists(image_path):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    # Security check: ensure the path is within the images directory
+    abs_image_path = os.path.abspath(image_path)
+    abs_images_dir = os.path.abspath(os.path.join("data", "images"))
+
+    if not abs_image_path.startswith(abs_images_dir):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return FileResponse(image_path)
 
 
 @app.get("/api/sources")
@@ -380,3 +424,231 @@ def publish_post(post_id: int) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Failed to publish post {post_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to publish: {str(e)}")
+
+
+@app.post("/api/posts/{post_id}/upload-image")
+def upload_post_image(post_id: int, file: UploadFile = File(...)) -> Dict[str, Any]:
+    """Upload an image to attach to a post."""
+    db = get_db()
+
+    # Verify post exists
+    post = db.get_post_with_trend(post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    # Validate file type
+    allowed_types = ["image/jpeg", "image/jpg", "image/png"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed types: {', '.join(allowed_types)}"
+        )
+
+    # Read file content
+    try:
+        file_content = file.file.read()
+        file_size = len(file_content)
+
+        # Validate file size (max 10MB)
+        max_size = 10 * 1024 * 1024  # 10MB
+        if file_size > max_size:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File too large. Maximum size is {max_size / 1024 / 1024}MB"
+            )
+
+        # Validate it's a valid image and get dimensions
+        if Image:
+            try:
+                from io import BytesIO
+                img = Image.open(BytesIO(file_content))
+                width, height = img.size
+                img.close()
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid image file: {str(e)}")
+        else:
+            width, height = None, None
+
+        # Create images directory if it doesn't exist
+        images_dir = os.path.join("data", "images")
+        os.makedirs(images_dir, exist_ok=True)
+
+        # Generate unique filename
+        import hashlib
+        file_hash = hashlib.md5(file_content).hexdigest()
+        file_ext = os.path.splitext(file.filename)[1] or ".jpg"
+        filename = f"{post_id}_{file_hash}{file_ext}"
+        file_path = os.path.join(images_dir, filename)
+
+        # Save file
+        with open(file_path, "wb") as f:
+            f.write(file_content)
+
+        # Update post with image path
+        with db.get_connection() as conn:
+            conn.execute("""
+                UPDATE posts
+                SET image_path = ?,
+                    updated_at = ?
+                WHERE id = ?
+            """, (file_path, datetime.utcnow(), post_id))
+
+            # Insert into post_images table
+            conn.execute("""
+                INSERT INTO post_images
+                (post_id, image_path, width, height, file_size, mime_type)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (post_id, file_path, width, height, file_size, file.content_type))
+
+        logger.info(f"Image uploaded for post {post_id}: {file_path}")
+
+        return {
+            "success": True,
+            "post_id": post_id,
+            "image_path": file_path,
+            "filename": filename,
+            "size": file_size,
+            "dimensions": {"width": width, "height": height} if width and height else None
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to upload image for post {post_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
+    finally:
+        file.file.close()
+
+
+@app.delete("/api/posts/{post_id}/image")
+def delete_post_image(post_id: int) -> Dict[str, Any]:
+    """Delete the image attached to a post."""
+    db = get_db()
+
+    # Verify post exists
+    post = db.get_post_with_trend(post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    image_path = post.get("image_path")
+    if not image_path:
+        raise HTTPException(status_code=404, detail="Post has no image attached")
+
+    try:
+        # Delete physical file
+        if os.path.exists(image_path):
+            os.remove(image_path)
+            logger.info(f"Deleted image file: {image_path}")
+
+        # Update database
+        with db.get_connection() as conn:
+            conn.execute("""
+                UPDATE posts
+                SET image_path = NULL,
+                    image_url = NULL,
+                    updated_at = ?
+                WHERE id = ?
+            """, (datetime.utcnow(), post_id))
+
+            # Delete from post_images table
+            conn.execute("""
+                DELETE FROM post_images
+                WHERE post_id = ? AND image_path = ?
+            """, (post_id, image_path))
+
+        return {
+            "success": True,
+            "post_id": post_id,
+            "message": "Image deleted successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to delete image for post {post_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete image: {str(e)}")
+
+
+# ============================================
+# Post Scheduling Endpoints
+# ============================================
+
+class SchedulePostRequest(BaseModel):
+    """Request to schedule a post"""
+    scheduled_time: str = Field(..., description="ISO format datetime (e.g., 2026-01-25T14:30:00)")
+
+
+@app.post("/api/posts/{post_id}/schedule")
+def schedule_post(post_id: int, request: SchedulePostRequest) -> Dict[str, Any]:
+    """Schedule a post for future publishing"""
+    try:
+        # Parse the scheduled time
+        scheduled_time = datetime.fromisoformat(request.scheduled_time)
+
+        # Verify post exists and is approved
+        db = get_db()
+        post = db.get_post_with_trend(post_id)
+        if not post:
+            raise HTTPException(status_code=404, detail="Post not found")
+
+        if post["status"] != "approved":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Post must be approved before scheduling (current status: {post['status']})"
+            )
+
+        # Schedule the post
+        scheduler = get_scheduler()
+        success = scheduler.schedule_post(post_id, scheduled_time)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to schedule post")
+
+        return {
+            "success": True,
+            "post_id": post_id,
+            "scheduled_for": scheduled_time.isoformat(),
+            "message": "Post scheduled successfully"
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid datetime format: {str(e)}")
+    except Exception as e:
+        logger.error(f"Failed to schedule post {post_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to schedule: {str(e)}")
+
+
+@app.delete("/api/posts/{post_id}/schedule")
+def unschedule_post(post_id: int) -> Dict[str, Any]:
+    """Cancel a scheduled post"""
+    try:
+        scheduler = get_scheduler()
+        success = scheduler.unschedule_post(post_id)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to unschedule post")
+
+        return {
+            "success": True,
+            "post_id": post_id,
+            "message": "Post unscheduled successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to unschedule post {post_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to unschedule: {str(e)}")
+
+
+@app.get("/api/scheduled-posts")
+def get_scheduled_posts(days_ahead: int = 30) -> Dict[str, Any]:
+    """Get all scheduled posts"""
+    try:
+        scheduler = get_scheduler()
+        posts = scheduler.get_scheduled_posts(days_ahead=days_ahead)
+
+        return {
+            "scheduled_posts": posts,
+            "count": len(posts)
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get scheduled posts: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get scheduled posts: {str(e)}")

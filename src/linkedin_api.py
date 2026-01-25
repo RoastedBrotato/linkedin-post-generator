@@ -6,6 +6,7 @@ Implements OAuth 2.0 flow and UGC Posts API v2 integration.
 
 import requests
 import time
+import os
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
@@ -26,6 +27,7 @@ class LinkedInAPI:
     API_BASE_URL = "https://api.linkedin.com/v2"
     UGC_POSTS_URL = f"{API_BASE_URL}/ugcPosts"
     USER_INFO_URL = f"{API_BASE_URL}/userinfo"
+    ASSETS_URL = f"{API_BASE_URL}/assets"
 
     # Required scopes for posting
     SCOPES = [
@@ -259,18 +261,116 @@ class LinkedInAPI:
             logger.error(f"Error getting user info: {e}")
             return None
 
+    def upload_image(self, image_path: str) -> Optional[str]:
+        """
+        Upload an image to LinkedIn and get the asset URN.
+
+        Args:
+            image_path: Path to the image file
+
+        Returns:
+            Asset URN string or None on failure
+        """
+        if not self.ensure_valid_token():
+            logger.error("Cannot upload image: Invalid or missing access token")
+            return None
+
+        if not self.user_urn:
+            logger.info("User URN not set, fetching user info")
+            user_info = self.get_user_info()
+            if not user_info:
+                logger.error("Cannot upload image: Failed to get user URN")
+                return None
+
+        try:
+            # Check if file exists
+            if not os.path.exists(image_path):
+                logger.error(f"Image file not found: {image_path}")
+                return None
+
+            # Get file size
+            file_size = os.path.getsize(image_path)
+            logger.info(f"Uploading image: {image_path} ({file_size} bytes)")
+
+            self._rate_limit()
+
+            # Step 1: Register the upload
+            register_data = {
+                "registerUploadRequest": {
+                    "recipes": ["urn:li:digitalmediaRecipe:feedshare-image"],
+                    "owner": self.user_urn,
+                    "serviceRelationships": [
+                        {
+                            "relationshipType": "OWNER",
+                            "identifier": "urn:li:userGeneratedContent"
+                        }
+                    ]
+                }
+            }
+
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Content-Type": "application/json",
+                "X-Restli-Protocol-Version": "2.0.0",
+            }
+
+            response = requests.post(
+                f"{self.ASSETS_URL}?action=registerUpload",
+                headers=headers,
+                json=register_data
+            )
+
+            if response.status_code not in [200, 201]:
+                logger.error(f"Failed to register upload: {response.status_code} - {response.text}")
+                return None
+
+            upload_response = response.json()
+            asset_urn = upload_response["value"]["asset"]
+            upload_url = upload_response["value"]["uploadMechanism"]["com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"]["uploadUrl"]
+
+            logger.info(f"Registered upload, asset URN: {asset_urn}")
+
+            # Step 2: Upload the image binary
+            self._rate_limit()
+
+            with open(image_path, "rb") as image_file:
+                image_data = image_file.read()
+
+            upload_headers = {
+                "Authorization": f"Bearer {self.access_token}",
+            }
+
+            upload_response = requests.put(
+                upload_url,
+                headers=upload_headers,
+                data=image_data
+            )
+
+            if upload_response.status_code not in [200, 201]:
+                logger.error(f"Failed to upload image: {upload_response.status_code} - {upload_response.text}")
+                return None
+
+            logger.info(f"✓ Successfully uploaded image to LinkedIn: {asset_urn}")
+            return asset_urn
+
+        except Exception as e:
+            logger.error(f"Error uploading image: {e}")
+            return None
+
     def publish_post(
         self,
         text: str,
         post_id: Optional[int] = None,
+        image_path: Optional[str] = None,
         visibility: str = "PUBLIC"
     ) -> Optional[Dict[str, Any]]:
         """
-        Publish a text post to LinkedIn.
+        Publish a post to LinkedIn with optional image.
 
         Args:
             text: Post content
             post_id: Optional database post ID for tracking
+            image_path: Optional path to image file to attach
             visibility: Post visibility (PUBLIC, CONNECTIONS, LOGGED_IN)
 
         Returns:
@@ -290,19 +390,44 @@ class LinkedInAPI:
         try:
             self._rate_limit()
 
-            logger.info(f"Publishing post to LinkedIn (length: {len(text)} chars)")
+            # Upload image if provided
+            asset_urn = None
+            if image_path:
+                logger.info(f"Publishing post with image to LinkedIn (length: {len(text)} chars)")
+                asset_urn = self.upload_image(image_path)
+                if not asset_urn:
+                    logger.warning("Image upload failed, posting without image")
+            else:
+                logger.info(f"Publishing text post to LinkedIn (length: {len(text)} chars)")
 
             # Build post data according to UGC Posts API v2
+            share_content = {
+                "shareCommentary": {
+                    "text": text
+                },
+                "shareMediaCategory": "IMAGE" if asset_urn else "NONE"
+            }
+
+            # Add media if image was uploaded
+            if asset_urn:
+                share_content["media"] = [
+                    {
+                        "status": "READY",
+                        "description": {
+                            "text": "Image"
+                        },
+                        "media": asset_urn,
+                        "title": {
+                            "text": "Image"
+                        }
+                    }
+                ]
+
             post_data = {
                 "author": self.user_urn,
                 "lifecycleState": "PUBLISHED",
                 "specificContent": {
-                    "com.linkedin.ugc.ShareContent": {
-                        "shareCommentary": {
-                            "text": text
-                        },
-                        "shareMediaCategory": "NONE"
-                    }
+                    "com.linkedin.ugc.ShareContent": share_content
                 },
                 "visibility": {
                     "com.linkedin.ugc.MemberNetworkVisibility": visibility

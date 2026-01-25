@@ -171,6 +171,38 @@ class Database:
         if "post_url" not in columns:
             cursor.execute("ALTER TABLE posts ADD COLUMN post_url TEXT")
 
+        # Add scheduling fields
+        if "scheduled_for" not in columns:
+            cursor.execute("ALTER TABLE posts ADD COLUMN scheduled_for TIMESTAMP")
+
+        if "is_scheduled" not in columns:
+            cursor.execute("ALTER TABLE posts ADD COLUMN is_scheduled INTEGER DEFAULT 0")
+
+        # Add image fields
+        if "image_path" not in columns:
+            cursor.execute("ALTER TABLE posts ADD COLUMN image_path TEXT")
+
+        if "image_url" not in columns:
+            cursor.execute("ALTER TABLE posts ADD COLUMN image_url TEXT")
+
+        # Create post_images table if it doesn't exist
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS post_images (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_id INTEGER NOT NULL,
+                image_path TEXT NOT NULL,
+                image_url TEXT,
+                uploaded_to_linkedin INTEGER DEFAULT 0,
+                linkedin_asset_id TEXT,
+                width INTEGER,
+                height INTEGER,
+                file_size INTEGER,
+                mime_type TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+            )
+        """)
+
         conn.commit()
 
     # ==================== TRENDS CRUD ====================
