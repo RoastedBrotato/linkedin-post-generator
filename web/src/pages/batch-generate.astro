@@ -1,0 +1,646 @@
+---
+import Base from "../layouts/Base.astro";
+import PageHero from "../components/PageHero.astro";
+
+const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
+---
+<Base title="Batch Post Generation - BrotatosLab">
+  <PageHero
+    title="Batch Post Generation"
+    subtitle="Generate multiple posts at once from your top trends. Save time and maintain consistent posting."
+  />
+
+  <section class="panel">
+    <div class="batch-wizard">
+      <!-- Step 1: Select Trends -->
+      <div id="step1" class="wizard-step active">
+        <h2>Step 1: Select Trends</h2>
+        <p class="help-text">Choose which trends you want to generate posts from</p>
+
+        <div class="filters">
+          <label for="trendCount">Number of posts to generate:</label>
+          <select id="trendCount">
+            <option value="3">3 posts</option>
+            <option value="5" selected>5 posts</option>
+            <option value="7">7 posts (full week)</option>
+            <option value="10">10 posts</option>
+          </select>
+          <button class="button" onclick="loadTopTrends()">Load Top Trends</button>
+        </div>
+
+        <div id="trendsContainer">
+          <p class="mono">Click "Load Top Trends" to begin</p>
+        </div>
+
+        <div class="step-actions">
+          <button class="button" id="nextToFormats" onclick="nextStep()" disabled>
+            Next: Choose Formats →
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 2: Choose Post Formats -->
+      <div id="step2" class="wizard-step">
+        <h2>Step 2: Choose Post Formats</h2>
+        <p class="help-text">Select a format for each post to keep your content diverse</p>
+
+        <div id="formatsContainer">
+          <!-- Will be populated dynamically -->
+        </div>
+
+        <div class="step-actions">
+          <button class="button secondary" onclick="previousStep()">← Back</button>
+          <button class="button" onclick="generatePosts()">Generate Posts</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Review & Schedule -->
+      <div id="step3" class="wizard-step">
+        <h2>Step 3: Review & Schedule</h2>
+        <p class="help-text">Your posts have been generated! Review and schedule them.</p>
+
+        <div id="resultsContainer">
+          <!-- Will be populated after generation -->
+        </div>
+
+        <div class="step-actions">
+          <button class="button secondary" onclick="location.href='/posts'">View All Posts</button>
+          <button class="button" onclick="bulkSchedule()">Schedule All</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script define:vars={{ apiBase }}>
+    const API_BASE = apiBase;
+    let selectedTrends = [];
+    let postFormats = [];
+    let generatedPosts = [];
+
+    async function loadTopTrends() {
+      const count = parseInt(document.getElementById("trendCount").value);
+      const container = document.getElementById("trendsContainer");
+
+      container.innerHTML = '<p class="mono">Loading trends...</p>';
+
+      try {
+        // Get recent trends (we'll fetch from query runs or directly from trends)
+        const response = await fetch(`${API_BASE}/api/query-runs?limit=1`);
+        if (!response.ok) throw new Error("Failed to load query runs");
+
+        const data = await response.json();
+        if (!data.results || data.results.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <p>No trends found. Run a search query first to discover trends.</p>
+              <a href="/" class="button">Run Search</a>
+            </div>
+          `;
+          return;
+        }
+
+        const queryRunId = data.results[0].id;
+
+        // Get trends from the latest query run
+        const trendsResponse = await fetch(`${API_BASE}/api/query-runs/${queryRunId}/results`);
+        if (!trendsResponse.ok) throw new Error("Failed to load trends");
+
+        const trendsData = await trendsResponse.json();
+        const trends = trendsData.results.slice(0, count);
+
+        if (trends.length === 0) {
+          container.innerHTML = '<p class="empty-state">No trends found.</p>';
+          return;
+        }
+
+        renderTrends(trends);
+      } catch (error) {
+        container.innerHTML = `<div class="error">Error loading trends: ${error.message}</div>`;
+      }
+    }
+
+    function renderTrends(trends) {
+      const container = document.getElementById("trendsContainer");
+      selectedTrends = trends;
+
+      let html = '<div class="trends-list">';
+      trends.forEach((trend, idx) => {
+        html += `
+          <div class="trend-card">
+            <div class="trend-number">${idx + 1}</div>
+            <div class="trend-content">
+              <h4>${trend.title}</h4>
+              <p>${(trend.description || '').substring(0, 200)}...</p>
+              <div class="trend-meta">
+                <span class="tag green">Score: ${(trend.relevance_score || trend.match_score || 0).toFixed(2)}</span>
+                <span class="tag blue">${trend.category || 'tech'}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      });
+      html += '</div>';
+
+      container.innerHTML = html;
+      document.getElementById("nextToFormats").disabled = false;
+    }
+
+    async function nextStep() {
+      // Hide step 1, show step 2
+      document.getElementById("step1").classList.remove("active");
+      document.getElementById("step2").classList.add("active");
+
+      // Load available post formats
+      await loadPostFormats();
+    }
+
+    function previousStep() {
+      document.getElementById("step2").classList.remove("active");
+      document.getElementById("step1").classList.add("active");
+    }
+
+    async function loadPostFormats() {
+      const container = document.getElementById("formatsContainer");
+
+      try {
+        const response = await fetch(`${API_BASE}/api/post-formats`);
+        if (!response.ok) throw new Error("Failed to load formats");
+
+        const data = await response.json();
+        const formats = data.formats;
+
+        let html = '<div class="format-assignments">';
+
+        selectedTrends.forEach((trend, idx) => {
+          html += `
+            <div class="format-assignment">
+              <div class="assignment-trend">
+                <span class="trend-number-small">${idx + 1}</span>
+                <strong>${trend.title}</strong>
+              </div>
+              <select class="format-select" data-trend-index="${idx}">
+                ${formats.map(fmt => `
+                  <option value="${fmt.id}">
+                    ${fmt.emoji} ${fmt.name} - ${fmt.description}
+                  </option>
+                `).join('')}
+              </select>
+            </div>
+          `;
+        });
+
+        html += '</div>';
+        html += '<div class="format-options-help"><button class="button secondary" onclick="autoDistributeFormats()">Auto-Distribute Formats</button><p class="help-text">Automatically assign different formats for variety</p></div>';
+
+        container.innerHTML = html;
+      } catch (error) {
+        container.innerHTML = `<div class="error">Error loading formats: ${error.message}</div>`;
+      }
+    }
+
+    function autoDistributeFormats() {
+      const formatSelects = document.querySelectorAll(".format-select");
+      const formatTypes = ["standard", "insight", "story", "question", "educational", "list", "hot_take"];
+
+      formatSelects.forEach((select, idx) => {
+        const formatIndex = idx % formatTypes.length;
+        select.value = formatTypes[formatIndex];
+      });
+    }
+
+    async function generatePosts() {
+      const formatSelects = document.querySelectorAll(".format-select");
+      const formats = Array.from(formatSelects).map(select => select.value);
+
+      const trendIds = selectedTrends.map(t => t.id);
+
+      // Show loading state
+      document.getElementById("step2").classList.remove("active");
+      document.getElementById("step3").classList.add("active");
+      document.getElementById("resultsContainer").innerHTML = '<p class="mono">Generating posts... This may take a minute.</p>';
+
+      try {
+        const response = await fetch(`${API_BASE}/api/posts/batch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            trend_ids: trendIds,
+            post_formats: formats
+          })
+        });
+
+        if (!response.ok) throw new Error("Failed to generate posts");
+
+        const data = await response.json();
+        generatedPosts = data.results.success;
+
+        renderResults(data);
+      } catch (error) {
+        document.getElementById("resultsContainer").innerHTML = `<div class="error">Error: ${error.message}</div>`;
+      }
+    }
+
+    function renderResults(data) {
+      const container = document.getElementById("resultsContainer");
+
+      let html = `
+        <div class="results-summary">
+          <div class="summary-stat">
+            <div class="stat-value">${data.success_count}</div>
+            <div class="stat-label">Posts Generated</div>
+          </div>
+          ${data.failed_count > 0 ? `
+            <div class="summary-stat error">
+              <div class="stat-value">${data.failed_count}</div>
+              <div class="stat-label">Failed</div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+
+      if (data.results.success.length > 0) {
+        html += '<div class="generated-posts">';
+        data.results.success.forEach((post, idx) => {
+          html += `
+            <div class="generated-post-card">
+              <div class="post-header">
+                <h4>${idx + 1}. ${post.title}</h4>
+                <span class="tag blue">${post.post_format}</span>
+              </div>
+              <div class="post-actions">
+                <a href="/posts/${post.post_id}" class="button secondary">Edit</a>
+                <button class="button" onclick="quickApprove(${post.post_id})">Approve</button>
+              </div>
+            </div>
+          `;
+        });
+        html += '</div>';
+
+        html += `
+          <div class="bulk-actions">
+            <button class="button secondary" onclick="bulkApproveAll()">Approve All</button>
+          </div>
+        `;
+      }
+
+      if (data.results.failed.length > 0) {
+        html += '<div class="failed-posts"><h3>Failed Posts</h3>';
+        data.results.failed.forEach(failed => {
+          html += `<p class="error">Trend ID ${failed.trend_id}: ${failed.error}</p>`;
+        });
+        html += '</div>';
+      }
+
+      container.innerHTML = html;
+    }
+
+    window.quickApprove = async function(postId) {
+      try {
+        const response = await fetch(`${API_BASE}/api/posts/${postId}/approve`, {
+          method: "POST"
+        });
+
+        if (!response.ok) throw new Error("Failed to approve post");
+
+        alert("Post approved!");
+      } catch (error) {
+        alert(`Error: ${error.message}`);
+      }
+    };
+
+    window.bulkApproveAll = async function() {
+      const postIds = generatedPosts.map(p => p.post_id);
+
+      if (postIds.length === 0) {
+        alert("No posts to approve");
+        return;
+      }
+
+      if (!confirm(`Approve all ${postIds.length} posts?`)) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/posts/bulk-approve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ post_ids: postIds })
+        });
+
+        if (!response.ok) throw new Error("Failed to approve posts");
+
+        const data = await response.json();
+        alert(`Successfully approved ${data.success_count} posts!`);
+      } catch (error) {
+        alert(`Error: ${error.message}`);
+      }
+    };
+
+    window.bulkSchedule = async function() {
+      if (generatedPosts.length === 0) {
+        alert("No posts to schedule");
+        return;
+      }
+
+      // Calculate schedule times (spread over the next 7 days)
+      const now = new Date();
+      const times = [];
+
+      for (let i = 0; i < generatedPosts.length; i++) {
+        const scheduleDate = new Date(now);
+        // Schedule posts on different days (morning time)
+        scheduleDate.setDate(scheduleDate.getDate() + Math.floor(i * 7 / generatedPosts.length));
+        scheduleDate.setHours(9 + (i % 3) * 3, 0, 0, 0); // 9am, 12pm, 3pm
+        times.push(scheduleDate.toISOString());
+      }
+
+      if (!confirm(`Schedule ${generatedPosts.length} posts over the next week?`)) return;
+
+      try {
+        // First approve all
+        const approveResponse = await fetch(`${API_BASE}/api/posts/bulk-approve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ post_ids: generatedPosts.map(p => p.post_id) })
+        });
+
+        if (!approveResponse.ok) throw new Error("Failed to approve posts");
+
+        // Then schedule all
+        const scheduleResponse = await fetch(`${API_BASE}/api/posts/bulk-schedule`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            post_ids: generatedPosts.map(p => p.post_id),
+            scheduled_times: times
+          })
+        });
+
+        if (!scheduleResponse.ok) throw new Error("Failed to schedule posts");
+
+        const data = await scheduleResponse.json();
+        alert(`Successfully scheduled ${data.success_count} posts!`);
+        location.href = "/schedule";
+      } catch (error) {
+        alert(`Error: ${error.message}`);
+      }
+    };
+  </script>
+
+  <style>
+    .batch-wizard {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .wizard-step {
+      display: none;
+    }
+
+    .wizard-step.active {
+      display: block;
+    }
+
+    .wizard-step h2 {
+      margin-bottom: 0.5rem;
+    }
+
+    .help-text {
+      color: var(--muted);
+      margin-bottom: 2rem;
+    }
+
+    .filters {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 2rem;
+      padding: 1rem;
+      background: var(--bg-light);
+      border-radius: 8px;
+    }
+
+    .filters label {
+      font-weight: bold;
+    }
+
+    .filters select {
+      padding: 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg);
+      color: var(--fg);
+    }
+
+    .trends-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .trend-card {
+      display: flex;
+      gap: 1rem;
+      padding: 1rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-light);
+    }
+
+    .trend-number {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      background: var(--accent);
+      color: white;
+      border-radius: 50%;
+      font-weight: bold;
+      flex-shrink: 0;
+    }
+
+    .trend-content {
+      flex: 1;
+    }
+
+    .trend-content h4 {
+      margin: 0 0 0.5rem 0;
+    }
+
+    .trend-content p {
+      margin: 0.5rem 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .trend-meta {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+
+    .format-assignments {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .format-assignment {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 1rem;
+      align-items: center;
+      padding: 1rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-light);
+    }
+
+    .assignment-trend {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .trend-number-small {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      background: var(--accent);
+      color: white;
+      border-radius: 50%;
+      font-size: 0.75rem;
+      font-weight: bold;
+    }
+
+    .format-select {
+      padding: 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg);
+      color: var(--fg);
+      min-width: 400px;
+    }
+
+    .format-options-help {
+      text-align: center;
+      padding: 1rem;
+      background: var(--bg-light);
+      border-radius: 8px;
+    }
+
+    .format-options-help .help-text {
+      margin-bottom: 0;
+      margin-top: 0.5rem;
+    }
+
+    .step-actions {
+      display: flex;
+      justify-content: space-between;
+      padding-top: 2rem;
+      border-top: 1px solid var(--border);
+      margin-top: 2rem;
+    }
+
+    .results-summary {
+      display: flex;
+      gap: 2rem;
+      margin-bottom: 2rem;
+      justify-content: center;
+    }
+
+    .summary-stat {
+      text-align: center;
+      padding: 1.5rem;
+      background: var(--bg-light);
+      border-radius: 8px;
+      min-width: 150px;
+    }
+
+    .stat-value {
+      font-size: 2.5rem;
+      font-weight: bold;
+      color: var(--accent);
+    }
+
+    .summary-stat.error .stat-value {
+      color: var(--accent-2);
+    }
+
+    .stat-label {
+      margin-top: 0.5rem;
+      color: var(--muted);
+    }
+
+    .generated-posts {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .generated-post-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-light);
+    }
+
+    .post-header {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .post-header h4 {
+      margin: 0;
+    }
+
+    .post-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .bulk-actions {
+      text-align: center;
+      padding: 1.5rem;
+      background: var(--bg-light);
+      border-radius: 8px;
+      margin-bottom: 2rem;
+    }
+
+    .failed-posts {
+      margin-top: 2rem;
+      padding: 1rem;
+      background: var(--tag-red-bg);
+      border-radius: 8px;
+    }
+
+    .failed-posts h3 {
+      margin-top: 0;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+    }
+
+    @media (max-width: 768px) {
+      .format-assignment {
+        grid-template-columns: 1fr;
+      }
+
+      .format-select {
+        min-width: auto;
+        width: 100%;
+      }
+    }
+  </style>
+</Base>

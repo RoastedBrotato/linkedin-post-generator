@@ -185,6 +185,10 @@ class Database:
         if "image_url" not in columns:
             cursor.execute("ALTER TABLE posts ADD COLUMN image_url TEXT")
 
+        # Add post format field
+        if "post_format" not in columns:
+            cursor.execute("ALTER TABLE posts ADD COLUMN post_format TEXT DEFAULT 'standard'")
+
         # Create post_images table if it doesn't exist
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS post_images (
@@ -683,7 +687,8 @@ class Database:
         content: str,
         trend_id: int,
         status: str = "pending",
-        hashtags: Optional[str] = None
+        hashtags: Optional[str] = None,
+        post_format: str = "standard"
     ) -> int:
         """Helper to create post from dict (for API)"""
         from src.models import Post
@@ -697,9 +702,14 @@ class Database:
         )
         post_id = self.create_post(post)
 
-        # Update with hashtags if provided
-        if hashtags:
-            self.update_post(post_id, hashtags=hashtags)
+        # Update with hashtags and post_format if provided
+        if hashtags or post_format != "standard":
+            update_params = {}
+            if hashtags:
+                update_params["hashtags"] = hashtags
+            if post_format != "standard":
+                update_params["post_format"] = post_format
+            self.update_post(post_id, **update_params)
 
         return post_id
 

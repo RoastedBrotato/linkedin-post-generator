@@ -19,6 +19,7 @@ from src.llm import LLMClient
 from src.linkedin_api import LinkedInAPI
 from src.logger import logger
 from src.scheduler import get_scheduler, start_scheduler, stop_scheduler
+from src.post_templates import get_all_format_options
 
 try:
     from PIL import Image
@@ -169,6 +170,14 @@ def list_sources() -> Dict[str, Any]:
     }
 
 
+@app.get("/api/post-formats")
+def list_post_formats() -> Dict[str, Any]:
+    """List available post formats/templates."""
+    return {
+        "formats": get_all_format_options()
+    }
+
+
 @app.post("/api/query-runs", response_model=QueryRunResponse)
 def create_query_run(payload: QueryRunCreate) -> QueryRunResponse:
     """Create a query run (execution handled later)."""
@@ -228,6 +237,7 @@ def list_query_runs(limit: int = 50, offset: int = 0) -> Dict[str, Any]:
 class PostCreate(BaseModel):
     """Payload for creating a post from a trend."""
     trend_id: int = Field(..., description="Trend ID to generate post from")
+    post_format: str = Field(default="standard", description="Post format/template to use")
 
 
 class PostUpdate(BaseModel):
@@ -293,14 +303,15 @@ def create_post(payload: PostCreate) -> PostResponse:
             "relevance_score": trend.get("relevance_score", 0.0),
         }
 
-        result = llm.generate_post(trend=trend_dict)
+        result = llm.generate_post(trend=trend_dict, post_format=payload.post_format)
 
         # Create post in database
         post_id = db.create_post_from_dict(
             content=result["content"],
             hashtags=" ".join(result.get("hashtags", [])),
             trend_id=payload.trend_id,
-            status="pending"
+            status="pending",
+            post_format=payload.post_format
         )
 
         row = db.get_post_with_trend(post_id)
@@ -320,6 +331,103 @@ def list_posts(status: Optional[str] = None, limit: int = 50) -> List[PostRespon
     db = get_db()
     posts = db.list_posts(status=status, limit=limit)
     return [_parse_post(post) for post in posts]
+
+
+class BatchPostCreate(BaseModel):
+    """Payload for batch post generation."""
+    trend_ids: List[int] = Field(..., description="List of trend IDs to generate posts from")
+    post_formats: Optional[List[str]] = Field(default=None, description="List of post formats (optional, one per trend)")
+    default_format: str = Field(default="standard", description="Default format if formats list not provided")
+
+
+@app.post("/api/posts/batch")
+def create_batch_posts(payload: BatchPostCreate) -> Dict[str, Any]:
+    """Generate multiple posts at once from trends."""
+    db = get_db()
+    llm = LLMClient()
+
+    if not payload.trend_ids:
+        raise HTTPException(status_code=400, detail="No trend IDs provided")
+
+    # If formats provided, validate length matches trends
+    formats = payload.post_formats
+    if formats and len(formats) != len(payload.trend_ids):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Number of formats ({len(formats)}) must match number of trends ({len(payload.trend_ids)})"
+        )
+
+    results = {
+        "success": [],
+        "failed": [],
+        "total": len(payload.trend_ids)
+    }
+
+    for idx, trend_id in enumerate(payload.trend_ids):
+        try:
+            # Get the trend
+            trend = db.get_trend_by_id(trend_id)
+            if not trend:
+                results["failed"].append({
+                    "trend_id": trend_id,
+                    "error": "Trend not found"
+                })
+                continue
+
+            # Determine post format
+            post_format = formats[idx] if formats else payload.default_format
+
+            logger.info(f"Generating {post_format} post for trend: {trend['title']}")
+
+            # Prepare trend dict
+            trend_dict = {
+                "title": trend["title"],
+                "description": trend.get("description", ""),
+                "url": trend.get("source_url", ""),
+                "source_name": trend.get("source_name", ""),
+                "category": trend.get("category", ""),
+                "relevance_score": trend.get("relevance_score", 0.0),
+            }
+
+            # Generate post
+            result = llm.generate_post(trend=trend_dict, post_format=post_format)
+
+            if not result:
+                results["failed"].append({
+                    "trend_id": trend_id,
+                    "error": "Failed to generate post"
+                })
+                continue
+
+            # Create post in database
+            post_id = db.create_post_from_dict(
+                content=result["content"],
+                hashtags=" ".join(result.get("hashtags", [])),
+                trend_id=trend_id,
+                status="pending",
+                post_format=post_format
+            )
+
+            results["success"].append({
+                "trend_id": trend_id,
+                "post_id": post_id,
+                "post_format": post_format,
+                "title": trend["title"]
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to generate post for trend {trend_id}: {e}")
+            results["failed"].append({
+                "trend_id": trend_id,
+                "error": str(e)
+            })
+
+    return {
+        "results": results,
+        "success_count": len(results["success"]),
+        "failed_count": len(results["failed"]),
+        "total_count": results["total"]
+    }
 
 
 @app.get("/api/posts/{post_id}", response_model=PostResponse)
@@ -377,6 +485,57 @@ def approve_post(post_id: int) -> PostResponse:
 
     updated_post = db.get_post_with_trend(post_id)
     return _parse_post(updated_post)
+
+
+class BulkApproveRequest(BaseModel):
+    """Request to approve multiple posts"""
+    post_ids: List[int] = Field(..., description="List of post IDs to approve")
+
+
+@app.post("/api/posts/bulk-approve")
+def bulk_approve_posts(request: BulkApproveRequest) -> Dict[str, Any]:
+    """Approve multiple posts at once."""
+    db = get_db()
+
+    results = {
+        "success": [],
+        "failed": [],
+        "total": len(request.post_ids)
+    }
+
+    for post_id in request.post_ids:
+        try:
+            post = db.get_post_with_trend(post_id)
+            if not post:
+                results["failed"].append({
+                    "post_id": post_id,
+                    "error": "Post not found"
+                })
+                continue
+
+            if post["status"] == "published":
+                results["failed"].append({
+                    "post_id": post_id,
+                    "error": "Post is already published"
+                })
+                continue
+
+            db.update_post_status(post_id, "approved")
+            results["success"].append(post_id)
+
+        except Exception as e:
+            logger.error(f"Failed to approve post {post_id}: {e}")
+            results["failed"].append({
+                "post_id": post_id,
+                "error": str(e)
+            })
+
+    return {
+        "results": results,
+        "success_count": len(results["success"]),
+        "failed_count": len(results["failed"]),
+        "total_count": results["total"]
+    }
 
 
 @app.post("/api/posts/{post_id}/publish")
@@ -652,3 +811,83 @@ def get_scheduled_posts(days_ahead: int = 30) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Failed to get scheduled posts: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get scheduled posts: {str(e)}")
+
+
+class BulkScheduleRequest(BaseModel):
+    """Request to schedule multiple posts"""
+    post_ids: List[int] = Field(..., description="List of post IDs to schedule")
+    scheduled_times: List[str] = Field(..., description="List of ISO format datetimes for each post")
+
+
+@app.post("/api/posts/bulk-schedule")
+def bulk_schedule_posts(request: BulkScheduleRequest) -> Dict[str, Any]:
+    """Schedule multiple posts at once."""
+    if len(request.post_ids) != len(request.scheduled_times):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Number of post_ids ({len(request.post_ids)}) must match number of scheduled_times ({len(request.scheduled_times)})"
+        )
+
+    db = get_db()
+    scheduler = get_scheduler()
+
+    results = {
+        "success": [],
+        "failed": [],
+        "total": len(request.post_ids)
+    }
+
+    for post_id, scheduled_time_str in zip(request.post_ids, request.scheduled_times):
+        try:
+            # Parse scheduled time
+            scheduled_time = datetime.fromisoformat(scheduled_time_str)
+
+            # Verify post exists and is approved
+            post = db.get_post_with_trend(post_id)
+            if not post:
+                results["failed"].append({
+                    "post_id": post_id,
+                    "error": "Post not found"
+                })
+                continue
+
+            if post["status"] != "approved":
+                results["failed"].append({
+                    "post_id": post_id,
+                    "error": f"Post must be approved before scheduling (current status: {post['status']})"
+                })
+                continue
+
+            # Schedule the post
+            success = scheduler.schedule_post(post_id, scheduled_time)
+
+            if not success:
+                results["failed"].append({
+                    "post_id": post_id,
+                    "error": "Failed to schedule post"
+                })
+                continue
+
+            results["success"].append({
+                "post_id": post_id,
+                "scheduled_for": scheduled_time.isoformat()
+            })
+
+        except ValueError as e:
+            results["failed"].append({
+                "post_id": post_id,
+                "error": f"Invalid datetime format: {str(e)}"
+            })
+        except Exception as e:
+            logger.error(f"Failed to schedule post {post_id}: {e}")
+            results["failed"].append({
+                "post_id": post_id,
+                "error": str(e)
+            })
+
+    return {
+        "results": results,
+        "success_count": len(results["success"]),
+        "failed_count": len(results["failed"]),
+        "total_count": results["total"]
+    }

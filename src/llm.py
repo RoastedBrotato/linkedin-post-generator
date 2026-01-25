@@ -7,6 +7,7 @@ Supports local LLM (Ollama) with OpenAI as optional fallback.
 import ollama
 from typing import Optional, Dict, Any, List
 from src.logger import logger
+from src.post_templates import get_post_template_prompt
 from config.settings import get_settings
 
 settings = get_settings()
@@ -32,6 +33,7 @@ class LLMClient:
     def generate_post(
         self,
         trend: Dict[str, Any],
+        post_format: str = "standard",
         system_prompt: Optional[str] = None,
         max_retries: int = 3
     ) -> Optional[Dict[str, Any]]:
@@ -40,16 +42,17 @@ class LLMClient:
 
         Args:
             trend: Trend dictionary with title, description, url, etc.
+            post_format: Post format type (standard, insight, story, etc.)
             system_prompt: Optional custom system prompt
             max_retries: Number of retry attempts on failure
 
         Returns:
-            Dict with 'content', 'hashtags', 'sources' or None on failure
+            Dict with 'content', 'hashtags', 'sources', 'post_format' or None on failure
         """
         if not system_prompt:
             system_prompt = self._get_default_system_prompt()
 
-        user_prompt = self._build_user_prompt(trend)
+        user_prompt = self._build_user_prompt(trend, post_format)
 
         for attempt in range(max_retries):
             try:
@@ -64,9 +67,9 @@ class LLMClient:
                     return None
 
                 if response:
-                    parsed = self._parse_post_response(response, trend)
+                    parsed = self._parse_post_response(response, trend, post_format)
                     if parsed:
-                        logger.info("Successfully generated post")
+                        logger.info(f"Successfully generated {post_format} post")
                         return parsed
 
                 logger.warning(f"Attempt {attempt + 1}/{max_retries} failed, retrying...")
@@ -144,8 +147,13 @@ SOURCE:
 CONFIDENCE: [High/Medium/Low]
 """
 
-    def _build_user_prompt(self, trend: Dict[str, Any]) -> str:
+    def _build_user_prompt(self, trend: Dict[str, Any], post_format: str = "standard") -> str:
         """Build user prompt from trend data"""
+        # If using a template, get the template-specific prompt
+        if post_format != "standard":
+            return get_post_template_prompt(post_format, trend)
+
+        # Otherwise use the default/standard format
         title = trend.get('title', 'No title')
         description = trend.get('description', 'No description')
         url = trend.get('url', '')
@@ -181,7 +189,7 @@ Remember to follow the format specified in the system prompt.
 """
         return prompt
 
-    def _parse_post_response(self, response: str, trend: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _parse_post_response(self, response: str, trend: Dict[str, Any], post_format: str = "standard") -> Optional[Dict[str, Any]]:
         """Parse LLM response into structured post data"""
         try:
             # Extract sections
@@ -220,7 +228,7 @@ Remember to follow the format specified in the system prompt.
             # Validate required sections
             if 'content' not in sections or not sections['content']:
                 logger.warning("No content found in LLM response, falling back to heuristic parsing")
-                return self._heuristic_parse_response(response, trend)
+                return self._heuristic_parse_response(response, trend, post_format)
 
             # Extract hashtags
             hashtags_text = sections.get('hashtags', '')
@@ -239,6 +247,7 @@ Remember to follow the format specified in the system prompt.
                 'trend_id': trend.get('id'),
                 'trend_title': trend.get('title'),
                 'trend_category': trend.get('category'),
+                'post_format': post_format,
             }
 
         except Exception as e:
@@ -246,7 +255,7 @@ Remember to follow the format specified in the system prompt.
             logger.debug(f"Response was: {response[:500]}")
             return self._heuristic_parse_response(response, trend)
 
-    def _heuristic_parse_response(self, response: str, trend: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _heuristic_parse_response(self, response: str, trend: Dict[str, Any], post_format: str = "standard") -> Optional[Dict[str, Any]]:
         """Fallback parsing when the LLM doesn't follow the strict format."""
         import re
 
@@ -267,6 +276,7 @@ Remember to follow the format specified in the system prompt.
             "trend_id": trend.get("id"),
             "trend_title": trend.get("title"),
             "trend_category": trend.get("category"),
+            "post_format": post_format,
         }
 
     def health_check(self) -> bool:

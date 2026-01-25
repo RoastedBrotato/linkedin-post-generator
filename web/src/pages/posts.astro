@@ -56,7 +56,10 @@ const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
         <div class="card post-card" data-post-id="${post.id}">
           <div class="post-header">
             <h3>${post.trend_title || "Untitled Post"}</h3>
-            <span class="tag ${getStatusColor(post.status)}">${post.status}</span>
+            <div class="post-tags">
+              <span class="tag ${getStatusColor(post.status)}">${post.status}</span>
+              ${post.post_format && post.post_format !== 'standard' ? `<span class="tag blue">${getFormatEmoji(post.post_format)} ${post.post_format}</span>` : ''}
+            </div>
           </div>
 
           <div class="post-content">
@@ -101,6 +104,19 @@ const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
     function truncate(text, length) {
       if (!text) return "";
       return text.length > length ? text.substring(0, length) + "..." : text;
+    }
+
+    function getFormatEmoji(format) {
+      const emojis = {
+        standard: "📝",
+        insight: "💡",
+        story: "📖",
+        question: "❓",
+        hot_take: "🔥",
+        educational: "🎓",
+        list: "📋"
+      };
+      return emojis[format] || "📝";
     }
 
     function formatDate(dateString) {
@@ -173,5 +189,25 @@ const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
     loadPosts();
   </script>
 
-  
+  <style>
+    .post-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 1rem;
+    }
+
+    .post-tags {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 768px) {
+      .post-header {
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+    }
+  </style>
 </Base>
