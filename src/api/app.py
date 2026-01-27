@@ -304,6 +304,11 @@ def create_post(payload: PostCreate) -> PostResponse:
         }
 
         result = llm.generate_post(trend=trend_dict, post_format=payload.post_format)
+        if not result:
+            raise HTTPException(
+                status_code=502,
+                detail="LLM failed to generate a post. Check LLM logs/health and try again."
+            )
 
         # Create post in database
         post_id = db.create_post_from_dict(
@@ -320,6 +325,8 @@ def create_post(payload: PostCreate) -> PostResponse:
 
         return _parse_post(row)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to generate post: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate post: {str(e)}")
