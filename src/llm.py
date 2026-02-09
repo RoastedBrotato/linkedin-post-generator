@@ -80,6 +80,64 @@ class LLMClient:
         logger.error("Failed to generate post after all retries")
         return None
 
+    def generate_comment(
+        self,
+        post_text: str,
+        max_chars: int = 240,
+        max_retries: int = 2
+    ) -> Optional[str]:
+        """Generate a short, single-line LinkedIn comment for a given post."""
+        system_prompt = (
+            "You write concise, professional LinkedIn comments about AI/tech posts. "
+            "Comments must be a single line, specific to the post, and invite light engagement. "
+            "No emojis, no hashtags, no bullet points."
+        )
+        user_prompt = (
+            "Write a single-line LinkedIn comment (max "
+            f"{max_chars} characters) that reacts thoughtfully to this post:\n\n"
+            f"{post_text.strip()}\n\n"
+            "Return only the comment text."
+        )
+
+        for attempt in range(max_retries):
+            try:
+                if self.provider == "ollama":
+                    response = ollama.chat(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        options={
+                            "temperature": max(0.2, min(0.7, self.temperature)),
+                            "num_predict": min(200, self.max_tokens),
+                        },
+                    )
+                    content = response["message"]["content"]
+                elif self.provider == "openai":
+                    logger.error("OpenAI provider not yet implemented for comments")
+                    content = None
+                else:
+                    logger.error(f"Unknown provider: {self.provider}")
+                    content = None
+
+                if not content:
+                    raise ValueError("Empty LLM response")
+
+                # Enforce single line and length
+                comment = " ".join(content.strip().splitlines()).strip()
+                if len(comment) > max_chars:
+                    comment = comment[:max_chars].rstrip()
+
+                if comment:
+                    return comment
+
+            except Exception as e:
+                logger.error(f"Error generating comment (attempt {attempt + 1}): {e}")
+
+        logger.error("Failed to generate comment after all retries")
+        return None
+
     def _generate_ollama(self, system_prompt: str, user_prompt: str) -> Optional[str]:
         """Generate using Ollama"""
         try:

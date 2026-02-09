@@ -231,6 +231,32 @@ class StorageConfig(BaseModel):
         return v
 
 
+class EngagementConfig(BaseModel):
+    """Configuration for LinkedIn engagement scraping/commenting"""
+
+    enabled: bool = Field(default=False, description="Enable LinkedIn engagement workflow")
+    headless: bool = Field(default=True, description="Run browser headless for scraping")
+    cookies_path: Path = Field(
+        default=BASE_DIR / "data" / "linkedin_cookies.json",
+        description="Playwright storage state file for LinkedIn session",
+    )
+    max_targets: int = Field(default=3, ge=1, le=10, description="Max posts to target per run")
+    keywords: List[str] = Field(
+        default=["AI", "machine learning", "LLM", "MLOps"],
+        description="Keywords to search for trending posts",
+    )
+    influencers: List[str] = Field(
+        default=[],
+        description="LinkedIn profile URLs or handles to pull recent posts from",
+    )
+    comment_max_chars: int = Field(
+        default=240, ge=60, le=400, description="Max comment length"
+    )
+
+    class Config:
+        env_prefix = "ENGAGE_"
+
+
 class LoggingConfig(BaseModel):
     """Logging configuration"""
 
@@ -299,6 +325,7 @@ class Settings(BaseModel):
     trends: TrendSourcesConfig = Field(default_factory=TrendSourcesConfig)
     post_generation: PostGenerationConfig = Field(default_factory=PostGenerationConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    engagement: EngagementConfig = Field(default_factory=EngagementConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
 
@@ -367,6 +394,30 @@ class Settings(BaseModel):
                 cleanup_old_trends_days=int(
                     os.getenv("STORAGE_CLEANUP_OLD_TRENDS_DAYS", "30")
                 ),
+            ),
+            engagement=EngagementConfig(
+                enabled=os.getenv("ENGAGE_ENABLED", "false").lower() == "true",
+                headless=os.getenv("ENGAGE_HEADLESS", "true").lower() == "true",
+                cookies_path=Path(
+                    os.getenv(
+                        "ENGAGE_COOKIES_PATH",
+                        str(BASE_DIR / "data" / "linkedin_cookies.json"),
+                    )
+                ),
+                max_targets=int(os.getenv("ENGAGE_MAX_TARGETS", "3")),
+                keywords=[
+                    k.strip()
+                    for k in os.getenv(
+                        "ENGAGE_KEYWORDS", "AI, machine learning, LLM, MLOps"
+                    ).split(",")
+                    if k.strip()
+                ],
+                influencers=[
+                    i.strip()
+                    for i in os.getenv("ENGAGE_INFLUENCERS", "").split(",")
+                    if i.strip()
+                ],
+                comment_max_chars=int(os.getenv("ENGAGE_COMMENT_MAX_CHARS", "240")),
             ),
             logging=LoggingConfig(
                 level=os.getenv("LOG_LEVEL", "INFO"),

@@ -105,6 +105,48 @@ CREATE TABLE IF NOT EXISTS query_run_trends (
     FOREIGN KEY (trend_id) REFERENCES trends(id) ON DELETE CASCADE
 );
 
+-- Engagement runs (LinkedIn comment suggestions)
+CREATE TABLE IF NOT EXISTS engagement_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    sources_json TEXT NOT NULL,
+    options_json TEXT NOT NULL,
+    error_message TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP
+);
+
+-- Engagement targets (LinkedIn posts to comment on)
+CREATE TABLE IF NOT EXISTS engagement_targets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    post_url TEXT NOT NULL,
+    author_name TEXT,
+    author_url TEXT,
+    post_text TEXT,
+    source TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    scraped_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (run_id) REFERENCES engagement_runs(id) ON DELETE CASCADE
+);
+
+-- Engagement comments (drafts + approvals)
+CREATE TABLE IF NOT EXISTS engagement_comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_id INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    generated_at TIMESTAMP NOT NULL,
+    approved_at TIMESTAMP,
+    posted_at TIMESTAMP,
+    linkedin_comment_id TEXT,
+    error_message TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (target_id) REFERENCES engagement_targets(id) ON DELETE CASCADE
+);
+
 -- Indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_trends_category ON trends(category);
 CREATE INDEX IF NOT EXISTS idx_trends_fetched_at ON trends(fetched_at);
@@ -118,6 +160,11 @@ CREATE INDEX IF NOT EXISTS idx_query_runs_status ON query_runs(status);
 CREATE INDEX IF NOT EXISTS idx_query_runs_created_at ON query_runs(created_at);
 CREATE INDEX IF NOT EXISTS idx_query_run_trends_query_run_id ON query_run_trends(query_run_id);
 CREATE INDEX IF NOT EXISTS idx_query_run_trends_match_score ON query_run_trends(match_score);
+CREATE INDEX IF NOT EXISTS idx_engagement_runs_status ON engagement_runs(status);
+CREATE INDEX IF NOT EXISTS idx_engagement_targets_run_id ON engagement_targets(run_id);
+CREATE INDEX IF NOT EXISTS idx_engagement_targets_status ON engagement_targets(status);
+CREATE INDEX IF NOT EXISTS idx_engagement_comments_target_id ON engagement_comments(target_id);
+CREATE INDEX IF NOT EXISTS idx_engagement_comments_status ON engagement_comments(status);
 """
 
 
@@ -612,6 +659,218 @@ class Database:
                 (query_run_id, limit, offset),
             )
             return [dict(row) for row in cursor.fetchall()]
+
+    # ==================== ENGAGEMENT RUNS CRUD ====================
+
+    def create_engagement_run(
+        self,
+        sources_json: str,
+        options_json: str,
+        status: str = "queued",
+    ) -> int:
+        """Create a new engagement run record"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO engagement_runs (
+                    status, sources_json, options_json, created_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (status, sources_json, options_json, datetime.utcnow()),
+            )
+            return cursor.lastrowid
+
+    def get_engagement_run(self, run_id: int) -> Optional[Dict[str, Any]]:
+        """Get an engagement run by ID"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM engagement_runs WHERE id = ?", (run_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def update_engagement_run(self, run_id: int, **kwargs) -> bool:
+        """Update an engagement run"""
+        if "sources_json" in kwargs and isinstance(kwargs["sources_json"], dict):
+            kwargs["sources_json"] = json.dumps(kwargs["sources_json"])
+        if "options_json" in kwargs and isinstance(kwargs["options_json"], dict):
+            kwargs["options_json"] = json.dumps(kwargs["options_json"])
+
+        set_clause = ", ".join(f"{k} = ?" for k in kwargs.keys())
+        values = list(kwargs.values()) + [run_id]
+
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                f"UPDATE engagement_runs SET {set_clause} WHERE id = ?", values
+            )
+            return cursor.rowcount > 0
+
+    def create_engagement_target(
+        self,
+        run_id: int,
+        post_url: str,
+        author_name: Optional[str] = None,
+        author_url: Optional[str] = None,
+        post_text: Optional[str] = None,
+        source: Optional[str] = None,
+        status: str = "pending",
+        scraped_at: Optional[datetime] = None,
+    ) -> int:
+        """Create a new engagement target record"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO engagement_targets (
+                    run_id, post_url, author_name, author_url, post_text,
+                    source, status, scraped_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    post_url,
+                    author_name,
+                    author_url,
+                    post_text,
+                    source,
+                    status,
+                    scraped_at or datetime.utcnow(),
+                    datetime.utcnow(),
+                ),
+            )
+            return cursor.lastrowid
+
+    def list_engagement_targets(
+        self,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """List engagement targets"""
+        with self.get_connection() as conn:
+            if status:
+                cursor = conn.execute(
+                    """
+                    SELECT * FROM engagement_targets
+                    WHERE status = ?
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (status, limit, offset),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    SELECT * FROM engagement_targets
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (limit, offset),
+                )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_engagement_target(self, target_id: int) -> Optional[Dict[str, Any]]:
+        """Get engagement target by ID"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM engagement_targets WHERE id = ?", (target_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def update_engagement_target(self, target_id: int, **kwargs) -> bool:
+        """Update an engagement target"""
+        set_clause = ", ".join(f"{k} = ?" for k in kwargs.keys())
+        values = list(kwargs.values()) + [target_id]
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                f"UPDATE engagement_targets SET {set_clause} WHERE id = ?", values
+            )
+            return cursor.rowcount > 0
+
+    def create_engagement_comment(
+        self,
+        target_id: int,
+        content: str,
+        status: str = "draft",
+        generated_at: Optional[datetime] = None,
+    ) -> int:
+        """Create a new engagement comment"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO engagement_comments (
+                    target_id, content, status, generated_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    target_id,
+                    content,
+                    status,
+                    generated_at or datetime.utcnow(),
+                    datetime.utcnow(),
+                    datetime.utcnow(),
+                ),
+            )
+            return cursor.lastrowid
+
+    def list_engagement_comments(
+        self,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """List engagement comments with target data"""
+        with self.get_connection() as conn:
+            if status:
+                cursor = conn.execute(
+                    """
+                    SELECT ec.*, et.post_url, et.author_name, et.author_url, et.post_text
+                    FROM engagement_comments ec
+                    JOIN engagement_targets et ON et.id = ec.target_id
+                    WHERE ec.status = ?
+                    ORDER BY ec.created_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (status, limit, offset),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    SELECT ec.*, et.post_url, et.author_name, et.author_url, et.post_text
+                    FROM engagement_comments ec
+                    JOIN engagement_targets et ON et.id = ec.target_id
+                    ORDER BY ec.created_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (limit, offset),
+                )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_engagement_comment(self, comment_id: int) -> Optional[Dict[str, Any]]:
+        """Get engagement comment by ID"""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT ec.*, et.post_url, et.author_name, et.author_url, et.post_text
+                FROM engagement_comments ec
+                JOIN engagement_targets et ON et.id = ec.target_id
+                WHERE ec.id = ?
+                """,
+                (comment_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def update_engagement_comment(self, comment_id: int, **kwargs) -> bool:
+        """Update an engagement comment"""
+        kwargs["updated_at"] = datetime.utcnow()
+        set_clause = ", ".join(f"{k} = ?" for k in kwargs.keys())
+        values = list(kwargs.values()) + [comment_id]
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                f"UPDATE engagement_comments SET {set_clause} WHERE id = ?", values
+            )
+            return cursor.rowcount > 0
 
     # ==================== HELPER METHODS FOR WEB API ====================
 

@@ -21,6 +21,13 @@ cd "$PROJECT_ROOT"
 LOG_DIR="$PROJECT_ROOT/logs"
 mkdir -p "$LOG_DIR"
 
+# Load environment variables from .env if present
+if [ -f ".env" ]; then
+    set -a
+    source .env
+    set +a
+fi
+
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}  LinkedIn Post Generator - Startup${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -67,6 +74,55 @@ if [ ! -d "web/node_modules" ]; then
     cd web
     npm install
     cd ..
+fi
+
+echo -e "${BLUE}[0/3]${NC} Checking LLM (Ollama)..."
+
+# Ensure Ollama is available and the configured model exists
+if ! command -v ollama >/dev/null 2>&1; then
+    echo -e "${YELLOW}!${NC} Ollama CLI not found. Post generation will fail."
+else
+    # Start Ollama if not running
+    if ! curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+        echo -e "  ${YELLOW}→${NC} Ollama not running. Starting..."
+        nohup ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
+        # Wait for Ollama to be ready
+        for i in {1..10}; do
+            if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+                echo -e "  ${GREEN}✓${NC} Ollama is running"
+                break
+            fi
+            if [ $i -eq 10 ]; then
+                echo -e "  ${YELLOW}!${NC} Ollama failed to start. Check logs/ollama.log"
+            fi
+            sleep 1
+        done
+    else
+        echo -e "  ${GREEN}✓${NC} Ollama is running"
+    fi
+
+    # Prefer existing models; pull only if none exist
+    LLM_MODEL="${LLM_MODEL:-llama3.1:latest}"
+    INSTALLED_MODELS=$(ollama list 2>/dev/null | awk 'NR>1 {print $1}')
+
+    if [ -z "$INSTALLED_MODELS" ]; then
+        echo -e "  ${YELLOW}→${NC} No Ollama models found. Pulling ${LLM_MODEL}..."
+        ollama pull "$LLM_MODEL"
+    else
+        if ! echo "$INSTALLED_MODELS" | grep -qx "$LLM_MODEL"; then
+            FALLBACK_MODEL=$(echo "$INSTALLED_MODELS" | head -n 1)
+            echo -e "  ${YELLOW}!${NC} Model ${LLM_MODEL} not found. Using ${FALLBACK_MODEL}."
+            LLM_MODEL="$FALLBACK_MODEL"
+            if [ -f ".env" ]; then
+                if grep -q "^LLM_MODEL=" .env; then
+                    sed -i.bak "s/^LLM_MODEL=.*/LLM_MODEL=${LLM_MODEL}/" .env
+                else
+                    echo "LLM_MODEL=${LLM_MODEL}" >> .env
+                fi
+            fi
+        fi
+    fi
+    export LLM_MODEL
 fi
 
 echo -e "${BLUE}[1/3]${NC} Starting API server..."

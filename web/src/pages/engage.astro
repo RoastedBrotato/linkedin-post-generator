@@ -1,0 +1,230 @@
+---
+import Base from "../layouts/Base.astro";
+import PageHero from "../components/PageHero.astro";
+
+const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000";
+---
+<Base title="Engage on LinkedIn">
+  <PageHero
+    title="Engage with trending LinkedIn posts."
+    subtitle="Draft short comments for trending AI/tech posts, review edits, then post."
+  />
+
+  <section class="panel">
+    <h2>Engagement Run</h2>
+    <form id="engageForm" class="grid">
+      <div class="grid grid-2">
+        <div>
+          <label for="engageKeywords">Keywords (comma or new line)</label>
+          <textarea
+            id="engageKeywords"
+            placeholder="AI, machine learning, LLM, MLOps"
+          ></textarea>
+        </div>
+        <div>
+          <label for="engageInfluencers">Influencers (profile URLs or handles)</label>
+          <textarea
+            id="engageInfluencers"
+            placeholder="https://www.linkedin.com/in/your-handle"
+          ></textarea>
+        </div>
+      </div>
+      <div class="grid grid-2">
+        <div>
+          <label for="engageMaxTargets">Posts to target</label>
+          <input id="engageMaxTargets" type="number" min="1" max="10" value="3" />
+        </div>
+        <div class="status">
+          Run status:
+          <strong id="engageStatus">Idle</strong>
+          <span id="engageMeta" class="mono"></span>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="button" type="submit">Find posts & draft comments</button>
+        <button class="button secondary" type="button" id="refreshDrafts">Refresh drafts</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel spaced">
+    <h2>Draft Comments</h2>
+    <div id="drafts" class="results"></div>
+  </section>
+
+  <script define:vars={{ apiBase }}>
+    const API_BASE = apiBase;
+    const form = document.getElementById("engageForm");
+    const draftsEl = document.getElementById("drafts");
+    const statusEl = document.getElementById("engageStatus");
+    const metaEl = document.getElementById("engageMeta");
+    const refreshBtn = document.getElementById("refreshDrafts");
+
+    const parseList = (value) => {
+      return value
+        .split(/[\n,]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    };
+
+    const renderDrafts = (items) => {
+      draftsEl.innerHTML = "";
+      if (!items.length) {
+        const empty = document.createElement("p");
+        empty.textContent = "No drafts yet. Run an engagement search above.";
+        empty.className = "mono";
+        draftsEl.appendChild(empty);
+        return;
+      }
+
+      items.forEach((item) => {
+        const card = document.createElement("div");
+        card.className = "card";
+
+        const title = document.createElement("h3");
+        title.textContent = item.author_name || "LinkedIn Post";
+        card.appendChild(title);
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = item.post_url ? item.post_url.replace("https://", "") : "Unknown post";
+        card.appendChild(meta);
+
+        if (item.post_text) {
+          const postText = document.createElement("p");
+          postText.textContent = item.post_text.slice(0, 240);
+          card.appendChild(postText);
+        }
+
+        const textArea = document.createElement("textarea");
+        textArea.className = "mono";
+        textArea.value = item.content;
+        textArea.rows = 3;
+        card.appendChild(textArea);
+
+        const actions = document.createElement("div");
+        actions.className = "card-actions";
+
+        if (item.post_url) {
+          const link = document.createElement("a");
+          link.href = item.post_url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.className = "tag orange";
+          link.textContent = "Open post";
+          actions.appendChild(link);
+        }
+
+        const saveBtn = document.createElement("button");
+        saveBtn.className = "button small";
+        saveBtn.textContent = "Save";
+        saveBtn.onclick = async () => {
+          saveBtn.disabled = true;
+          try {
+            await fetch(`${API_BASE}/api/engagement/comments/${item.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ content: textArea.value }),
+            });
+            saveBtn.textContent = "Saved";
+            setTimeout(() => (saveBtn.textContent = "Save"), 1200);
+          } finally {
+            saveBtn.disabled = false;
+          }
+        };
+        actions.appendChild(saveBtn);
+
+        const approveBtn = document.createElement("button");
+        approveBtn.className = "button small";
+        approveBtn.textContent = "Approve";
+        approveBtn.onclick = async () => {
+          approveBtn.disabled = true;
+          await fetch(`${API_BASE}/api/engagement/comments/${item.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "approved" }),
+          });
+          loadDrafts();
+        };
+        actions.appendChild(approveBtn);
+
+        const postBtn = document.createElement("button");
+        postBtn.className = "button small";
+        postBtn.textContent = "Post";
+        postBtn.onclick = async () => {
+          if (!confirm("Post this comment to LinkedIn?")) return;
+          postBtn.disabled = true;
+          const res = await fetch(`${API_BASE}/api/engagement/comments/${item.id}/post`, {
+            method: "POST",
+          });
+          if (!res.ok) {
+            const err = await res.json();
+            alert(err.detail || "Failed to post comment");
+          }
+          loadDrafts();
+        };
+        actions.appendChild(postBtn);
+
+        card.appendChild(actions);
+        draftsEl.appendChild(card);
+      });
+    };
+
+    const loadDrafts = async () => {
+      const response = await fetch(`${API_BASE}/api/engagement/comments?status=draft`);
+      if (!response.ok) return;
+      const data = await response.json();
+      renderDrafts(data);
+    };
+
+    const pollRun = (runId) => {
+      const interval = setInterval(async () => {
+        const res = await fetch(`${API_BASE}/api/engagement/runs/${runId}`);
+        if (!res.ok) {
+          statusEl.textContent = "Error";
+          clearInterval(interval);
+          return;
+        }
+        const run = await res.json();
+        statusEl.textContent = run.status;
+        metaEl.textContent = run.status === "complete" ? `run #${runId}` : "";
+        if (run.status === "complete" || run.status === "failed") {
+          clearInterval(interval);
+          loadDrafts();
+        }
+      }, 2000);
+    };
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      statusEl.textContent = "Submitting...";
+      metaEl.textContent = "";
+
+      const payload = {
+        keywords: parseList(document.getElementById("engageKeywords").value),
+        influencers: parseList(document.getElementById("engageInfluencers").value),
+        max_targets: Number(document.getElementById("engageMaxTargets").value) || 3,
+      };
+
+      const response = await fetch(`${API_BASE}/api/engagement/runs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        statusEl.textContent = error.detail || "Failed";
+        return;
+      }
+
+      const run = await response.json();
+      statusEl.textContent = run.status;
+      metaEl.textContent = `run #${run.id}`;
+      pollRun(run.id);
+    });
+
+    refreshBtn.addEventListener("click", loadDrafts);
+    loadDrafts();
+  </script>
+</Base>

@@ -17,6 +17,7 @@ from src.database import get_db
 from src.api.query_runner import enqueue_query_run
 from src.llm import LLMClient
 from src.linkedin_api import LinkedInAPI
+from src.linkedin_engagement import LinkedInEngagementClient
 from src.logger import logger
 from src.scheduler import get_scheduler, start_scheduler, stop_scheduler
 from src.post_templates import get_all_format_options
@@ -27,6 +28,7 @@ except ImportError:
     Image = None
 
 _POST_EXECUTOR = ThreadPoolExecutor(max_workers=2)
+_ENGAGE_EXECUTOR = ThreadPoolExecutor(max_workers=1)
 
 app = FastAPI(title="LinkedIn Post Generator API")
 
@@ -97,6 +99,56 @@ class QueryRunResponse(BaseModel):
     error_message: Optional[str] = None
 
 
+class EngagementRunCreate(BaseModel):
+    """Payload for creating an engagement run."""
+    keywords: List[str] = Field(default_factory=list)
+    influencers: List[str] = Field(default_factory=list)
+    max_targets: int = Field(default=3, ge=1, le=10)
+
+
+class EngagementRunResponse(BaseModel):
+    id: int
+    status: str
+    sources: Dict[str, Any]
+    options: Dict[str, Any]
+    created_at: str
+    completed_at: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class EngagementTargetResponse(BaseModel):
+    id: int
+    run_id: int
+    post_url: str
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
+    post_text: Optional[str] = None
+    source: Optional[str] = None
+    status: str
+    scraped_at: str
+    created_at: str
+
+
+class EngagementCommentResponse(BaseModel):
+    id: int
+    target_id: int
+    content: str
+    status: str
+    generated_at: str
+    approved_at: Optional[str] = None
+    posted_at: Optional[str] = None
+    post_url: Optional[str] = None
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
+    post_text: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class EngagementCommentUpdate(BaseModel):
+    content: Optional[str] = None
+    status: Optional[str] = None
+
+
 def _parse_query_run(row: Dict[str, Any]) -> QueryRunResponse:
     """Convert DB row to API response payload."""
     return QueryRunResponse(
@@ -108,6 +160,50 @@ def _parse_query_run(row: Dict[str, Any]) -> QueryRunResponse:
         options=json.loads(row.get("options_json") or "{}"),
         created_at=str(row["created_at"]),
         completed_at=str(row["completed_at"]) if row.get("completed_at") else None,
+        error_message=row.get("error_message"),
+    )
+
+
+def _parse_engagement_run(row: Dict[str, Any]) -> EngagementRunResponse:
+    return EngagementRunResponse(
+        id=row["id"],
+        status=row["status"],
+        sources=json.loads(row.get("sources_json") or "{}"),
+        options=json.loads(row.get("options_json") or "{}"),
+        created_at=str(row["created_at"]),
+        completed_at=str(row["completed_at"]) if row.get("completed_at") else None,
+        error_message=row.get("error_message"),
+    )
+
+
+def _parse_engagement_target(row: Dict[str, Any]) -> EngagementTargetResponse:
+    return EngagementTargetResponse(
+        id=row["id"],
+        run_id=row["run_id"],
+        post_url=row["post_url"],
+        author_name=row.get("author_name"),
+        author_url=row.get("author_url"),
+        post_text=row.get("post_text"),
+        source=row.get("source"),
+        status=row["status"],
+        scraped_at=str(row["scraped_at"]),
+        created_at=str(row["created_at"]),
+    )
+
+
+def _parse_engagement_comment(row: Dict[str, Any]) -> EngagementCommentResponse:
+    return EngagementCommentResponse(
+        id=row["id"],
+        target_id=row["target_id"],
+        content=row["content"],
+        status=row["status"],
+        generated_at=str(row["generated_at"]),
+        approved_at=str(row["approved_at"]) if row.get("approved_at") else None,
+        posted_at=str(row["posted_at"]) if row.get("posted_at") else None,
+        post_url=row.get("post_url"),
+        author_name=row.get("author_name"),
+        author_url=row.get("author_url"),
+        post_text=row.get("post_text"),
         error_message=row.get("error_message"),
     )
 
@@ -338,6 +434,165 @@ def list_posts(status: Optional[str] = None, limit: int = 50) -> List[PostRespon
     db = get_db()
     posts = db.list_posts(status=status, limit=limit)
     return [_parse_post(post) for post in posts]
+
+
+def _run_engagement(run_id: int, payload: EngagementRunCreate) -> None:
+    db = get_db()
+    try:
+        db.update_engagement_run(run_id, status="running")
+        client = LinkedInEngagementClient()
+
+        targets = client.fetch_targets(
+            keywords=payload.keywords,
+            influencers=payload.influencers,
+            limit=payload.max_targets,
+        )
+
+        for target in targets:
+            target_id = db.create_engagement_target(
+                run_id=run_id,
+                post_url=target.post_url,
+                author_name=target.author_name,
+                author_url=target.author_url,
+                post_text=target.post_text,
+                source=target.source,
+                status="pending",
+            )
+
+            comment = client.generate_comment(target.post_text or "")
+            if comment:
+                db.create_engagement_comment(
+                    target_id=target_id,
+                    content=comment,
+                    status="draft",
+                )
+            else:
+                db.update_engagement_target(target_id, status="skipped")
+
+        db.update_engagement_run(run_id, status="complete", completed_at=datetime.utcnow())
+    except Exception as exc:
+        logger.error(f"Engagement run failed: {exc}")
+        db.update_engagement_run(
+            run_id,
+            status="failed",
+            error_message=str(exc),
+            completed_at=datetime.utcnow(),
+        )
+
+
+@app.post("/api/engagement/runs", response_model=EngagementRunResponse)
+def create_engagement_run(payload: EngagementRunCreate) -> EngagementRunResponse:
+    """Start an engagement run to scrape trending posts and draft comments."""
+    from config.settings import get_settings
+
+    settings = get_settings().engagement
+    if not settings.enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="Engagement is disabled. Set ENGAGE_ENABLED=true and configure cookies.",
+        )
+
+    keywords = payload.keywords or settings.keywords
+    influencers = payload.influencers or settings.influencers
+
+    if not keywords and not influencers:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide keywords or influencers to search for engagement targets.",
+        )
+
+    run_id = get_db().create_engagement_run(
+        sources_json=json.dumps({"keywords": keywords, "influencers": influencers}),
+        options_json=json.dumps({"max_targets": payload.max_targets}),
+        status="queued",
+    )
+
+    _ENGAGE_EXECUTOR.submit(
+        _run_engagement,
+        run_id,
+        EngagementRunCreate(
+            keywords=keywords,
+            influencers=influencers,
+            max_targets=payload.max_targets,
+        ),
+    )
+
+    row = get_db().get_engagement_run(run_id)
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to create engagement run.")
+    return _parse_engagement_run(row)
+
+
+@app.get("/api/engagement/runs/{run_id}", response_model=EngagementRunResponse)
+def get_engagement_run(run_id: int) -> EngagementRunResponse:
+    row = get_db().get_engagement_run(run_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Engagement run not found")
+    return _parse_engagement_run(row)
+
+
+@app.get("/api/engagement/targets", response_model=List[EngagementTargetResponse])
+def list_engagement_targets(status: Optional[str] = None, limit: int = 50) -> List[EngagementTargetResponse]:
+    rows = get_db().list_engagement_targets(status=status, limit=limit)
+    return [_parse_engagement_target(row) for row in rows]
+
+
+@app.get("/api/engagement/comments", response_model=List[EngagementCommentResponse])
+def list_engagement_comments(status: Optional[str] = None, limit: int = 50) -> List[EngagementCommentResponse]:
+    rows = get_db().list_engagement_comments(status=status, limit=limit)
+    return [_parse_engagement_comment(row) for row in rows]
+
+
+@app.patch("/api/engagement/comments/{comment_id}", response_model=EngagementCommentResponse)
+def update_engagement_comment(comment_id: int, payload: EngagementCommentUpdate) -> EngagementCommentResponse:
+    db = get_db()
+    row = db.get_engagement_comment(comment_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Engagement comment not found")
+
+    updates: Dict[str, Any] = {}
+    if payload.content is not None:
+        updates["content"] = payload.content.strip()
+    if payload.status is not None:
+        updates["status"] = payload.status
+        if payload.status == "approved":
+            updates["approved_at"] = datetime.utcnow()
+        if payload.status == "rejected":
+            updates["approved_at"] = None
+
+    if updates:
+        db.update_engagement_comment(comment_id, **updates)
+
+    updated = db.get_engagement_comment(comment_id)
+    return _parse_engagement_comment(updated)
+
+
+@app.post("/api/engagement/comments/{comment_id}/post", response_model=EngagementCommentResponse)
+def post_engagement_comment(comment_id: int) -> EngagementCommentResponse:
+    db = get_db()
+    row = db.get_engagement_comment(comment_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Engagement comment not found")
+
+    if row["status"] != "approved":
+        raise HTTPException(status_code=400, detail="Comment must be approved before posting")
+
+    client = LinkedInEngagementClient()
+    try:
+        client.post_comment(row["post_url"], row["content"])
+        db.update_engagement_comment(
+            comment_id,
+            status="posted",
+            posted_at=datetime.utcnow(),
+            error_message=None,
+        )
+        db.update_engagement_target(row["target_id"], status="commented")
+    except Exception as exc:
+        db.update_engagement_comment(comment_id, error_message=str(exc))
+        raise HTTPException(status_code=500, detail=f"Failed to post comment: {str(exc)}")
+
+    updated = db.get_engagement_comment(comment_id)
+    return _parse_engagement_comment(updated)
 
 
 class BatchPostCreate(BaseModel):

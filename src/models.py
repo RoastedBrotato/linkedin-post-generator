@@ -116,3 +116,75 @@ class QueryRunTrend(BaseModel):
     match_fields: Dict[str, str] = Field(default_factory=dict)
     rank: int = Field(default=0, ge=0)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class EngagementRunStatus(str, Enum):
+    """Status of an engagement run"""
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class EngagementTargetStatus(str, Enum):
+    """Status of a scraped LinkedIn post target"""
+    PENDING = "pending"
+    COMMENTED = "commented"
+    SKIPPED = "skipped"
+
+
+class EngagementCommentStatus(str, Enum):
+    """Status of a generated comment"""
+    DRAFT = "draft"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    POSTED = "posted"
+
+
+class EngagementRun(BaseModel):
+    """Model for engagement run tracking"""
+    id: Optional[int] = None
+    status: EngagementRunStatus = EngagementRunStatus.QUEUED
+    sources: Dict[str, Any] = Field(default_factory=dict)
+    options: Dict[str, Any] = Field(default_factory=dict)
+    error_message: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        use_enum_values = True
+
+
+class EngagementTarget(BaseModel):
+    """Model for a LinkedIn post selected for engagement"""
+    id: Optional[int] = None
+    run_id: int
+    post_url: str
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
+    post_text: Optional[str] = None
+    source: Optional[str] = None
+    status: EngagementTargetStatus = EngagementTargetStatus.PENDING
+    scraped_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        use_enum_values = True
+
+
+class EngagementComment(BaseModel):
+    """Model for a generated engagement comment"""
+    id: Optional[int] = None
+    target_id: int
+    content: str = Field(..., min_length=1, max_length=400)
+    status: EngagementCommentStatus = EngagementCommentStatus.DRAFT
+    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    approved_at: Optional[datetime] = None
+    posted_at: Optional[datetime] = None
+    linkedin_comment_id: Optional[str] = None
+    error_message: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        use_enum_values = True
