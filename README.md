@@ -12,6 +12,7 @@ A local-first pipeline that turns tech/AI trends into LinkedIn-ready posts. Incl
 - 🤖 Local LLM integration (Ollama; OpenAI fallback optional)
 - 🧭 Trend aggregation from Hacker News, RSS feeds, Reddit, and GitHub Trending
 - ✍️ Post generation pipeline with validation + source citations
+- 🎨 **Automatic AI image generation** for posts using Stable Diffusion
 - ✅ Manual review + approval workflow (CLI + Web UI)
 - 🔗 LinkedIn OAuth 2.0 posting flow with token refresh
 - 💾 Local storage (SQLite + file-based artifacts)
@@ -65,7 +66,20 @@ Update `.env` with your settings. The database is created automatically on first
 ollama pull llama2
 ```
 
-### 4) Optional: LinkedIn OAuth (publishing)
+### 4) Image Generation (Hugging Face)
+
+Get a free API token for automatic image generation:
+
+```bash
+# 1. Visit https://huggingface.co/settings/tokens
+# 2. Create a new token
+# 3. Add to .env:
+HUGGINGFACE_API_TOKEN=hf_your_token_here
+```
+
+See `IMAGE_GENERATION_SETUP.md` for detailed setup instructions.
+
+### 5) Optional: LinkedIn OAuth (publishing)
 
 ```bash
 python scripts/linkedin_oauth.py
@@ -73,7 +87,7 @@ python scripts/linkedin_oauth.py
 
 This stores tokens in `.env`. See `LINKEDIN_SETUP.md` for the full walkthrough.
 
-### 5) Optional: Reddit source setup
+### 6) Optional: Reddit source setup
 
 See `REDDIT_SETUP.md` to configure Reddit API credentials.
 

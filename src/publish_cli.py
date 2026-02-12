@@ -154,13 +154,18 @@ class PublishCLI:
         """
         post_id = post.get("id")
         content = post.get("content", "")
+        image_path = post.get("image_path")
 
-        console.print(f"\n[dim]Publishing post {post_id} to LinkedIn...[/dim]")
+        if image_path:
+            console.print(f"\n[dim]Publishing post {post_id} to LinkedIn with image...[/dim]")
+        else:
+            console.print(f"\n[dim]Publishing post {post_id} to LinkedIn...[/dim]")
 
         try:
             result = self.api.publish_post(
                 text=content,
                 post_id=post_id,
+                image_path=image_path,
                 visibility="PUBLIC"
             )
 
@@ -187,6 +192,7 @@ class PublishCLI:
         content = post.get("content", "No content")
         status = post.get("status", "unknown")
         created_at = post.get("generated_at", "Unknown")
+        image_path = post.get("image_path")
 
         # Get associated trend
         trend = self.db.get_trend(post.get("trend_id")) if post.get("trend_id") else None
@@ -195,6 +201,11 @@ class PublishCLI:
         info = f"[bold]Post ID:[/bold] {post_id}\n"
         info += f"[bold]Status:[/bold] {status}\n"
         info += f"[bold]Created:[/bold] {created_at}\n"
+
+        if image_path:
+            info += f"[bold]Image:[/bold] [green]✓ Attached[/green] ({image_path})\n"
+        else:
+            info += f"[bold]Image:[/bold] [dim]None[/dim]\n"
 
         if trend:
             info += f"[bold]Trend:[/bold] {trend.get('title', 'Unknown')[:60]}...\n"
@@ -348,6 +359,7 @@ class PublishCLI:
             result = self.api.publish_post(
                 text=post.get("content", ""),
                 post_id=post.get("id"),
+                image_path=post.get("image_path"),
                 visibility="PUBLIC"
             )
 

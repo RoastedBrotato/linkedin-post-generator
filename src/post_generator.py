@@ -11,6 +11,7 @@ from src.llm import LLMClient
 from src.logger import logger
 from src.models import Post, Source, Trend, TrendCategory
 from src.validators import normalize_hashtags, validate_post_components
+from src.image_generator import ImageGenerator
 
 
 class PostGenerator:
@@ -20,10 +21,12 @@ class PostGenerator:
         self,
         db: Optional[Database] = None,
         llm: Optional[LLMClient] = None,
+        image_generator: Optional[ImageGenerator] = None,
     ) -> None:
         self.settings = get_settings()
         self.db = db
         self.llm = llm or LLMClient()
+        self.image_generator = image_generator or ImageGenerator()
 
     def generate_post_for_trend(
         self,
@@ -54,6 +57,21 @@ class PostGenerator:
             logger.warning(f"Post validation failed: {errors}")
             return None
 
+        # Generate image for the post
+        image_path = None
+        try:
+            logger.info("Generating image for LinkedIn post...")
+            image_path = self.image_generator.generate_image_from_post(
+                post_content=content,
+                trend_title=trend.get("title")
+            )
+            if image_path:
+                logger.info(f"Image generated successfully: {image_path}")
+            else:
+                logger.warning("Image generation returned no path, continuing without image")
+        except Exception as e:
+            logger.warning(f"Image generation failed: {e}. Continuing without image.")
+
         post_record = {
             "content": content,
             "hashtags": hashtags,
@@ -61,6 +79,7 @@ class PostGenerator:
             "confidence": result.get("confidence", "Medium"),
             "trend_title": trend.get("title"),
             "trend_category": trend.get("category"),
+            "image_path": image_path,
         }
 
         if save_to_db and self.db:
@@ -69,7 +88,7 @@ class PostGenerator:
                 logger.error("Unable to persist trend for post.")
                 return None
 
-            post_id = self._save_post(trend_id, content)
+            post_id = self._save_post(trend_id, content, image_path)
             if post_id is None:
                 return None
 
@@ -135,14 +154,20 @@ class PostGenerator:
             logger.error(f"Failed to save trend: {exc}")
             return None
 
-    def _save_post(self, trend_id: int, content: str) -> Optional[int]:
+    def _save_post(self, trend_id: int, content: str, image_path: Optional[str] = None) -> Optional[int]:
         """Persist the post in the database."""
         if not self.db:
             return None
 
         try:
-            post = Post(trend_id=trend_id, content=content)
-            return self.db.create_post(post)
+            post = Post(trend_id=trend_id, content=content, image_path=image_path)
+            post_id = self.db.create_post(post)
+
+            # Update with image_path if provided (since create_post may not handle it)
+            if post_id and image_path:
+                self.db.update_post(post_id, image_path=image_path)
+
+            return post_id
         except Exception as exc:
             logger.error(f"Failed to save post: {exc}")
             return None
